@@ -4,6 +4,7 @@ Este arquivo passa o contexto da fase de arquitetura para a fase de construção
 
 Documentos de apoio (colocar em `docs/`):
 - `docs/arquitetura.md`: arquitetura completa, com diagramas, modelo de dados, contrato e decisões. **É a fonte da verdade.**
+- `docs/implementacao.md`: como construir: tabelas em SQL, contrato campo a campo, algoritmos, configuração, testes obrigatórios e definição de pronto por fatia. Consultar antes de cada fatia.
 - `docs/referencias.md`: base científica e de mercado de cada decisão.
 - `docs/diferenciais.md`: diferenciais planejados para a fase 2.
 

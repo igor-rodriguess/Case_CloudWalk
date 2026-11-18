@@ -6,7 +6,7 @@ Documento vivo. Cada decisão tem um status:
 - **Decidida:** validada e fechada.
 - **Proposta:** recomendação ainda a validar.
 
-Referências completas em [`referencias.md`](referencias.md). Detalhe dos diferenciais em [`diferenciais.md`](diferenciais.md).
+Referências completas em [`referencias.md`](referencias.md). Detalhe dos diferenciais em [`diferenciais.md`](diferenciais.md). Como construir (SQL, contrato, algoritmos, testes) em [`implementacao.md`](implementacao.md).
 
 ---
 
@@ -113,6 +113,34 @@ flowchart TD
 
 Toda seta gera um evento no log de auditoria.
 
+### 7.1 Sequência de uma mensagem (caminho feliz)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant L as Lojista
+    participant N as Núcleo
+    participant B as Broker
+    participant K as Kafka
+    participant A as Agente mock
+    L->>N: mensagem do cliente
+    Note over N: transicionar grava estado,<br/>auditoria e outbox numa transação
+    N->>B: webhook conversa.atribuida (relay da outbox)
+    B->>K: publica em helpdesk.para-agente (acks=all)
+    B-->>N: 200 só depois do ack do Kafka
+    K->>A: consome
+    Note over A: inbox do agente ignora repetido
+    A->>K: mensagem.enviada em agente.para-helpdesk
+    K->>B: consome
+    B->>N: POST /agente/eventos
+    Note over N: inbox e fencing por id_atribuicao,<br/>grava a resposta e a outbox do canal
+    N-->>B: 200
+    Note over B: só agora confirma o offset
+    N->>L: resposta pelo canal de origem
+```
+
+O que cada garantia protege está na seção 11. Detalhe de implementação em [`implementacao.md`](implementacao.md).
+
 ## 8. Estados da conversa (proposta)
 
 ```mermaid
@@ -121,7 +149,7 @@ stateDiagram-v2
     nova --> na_fila: triagem e roteamento
     na_fila --> com_ia: distribuída para IA
     na_fila --> com_humano: fila só humana
-    com_ia --> escalada: agente escalou ou timeout
+    com_ia --> escalada: agente escalou, timeout ou falha de integração
     escalada --> com_humano: analista assumiu
     com_humano --> com_ia: analista devolveu
     com_ia --> resolvida
@@ -144,35 +172,37 @@ flowchart LR
     end
 
     subgraph Nucleo[Núcleo: monólito modular]
-        IN[Entrada]
-        TR[Triagem]
-        RO[Roteador]
-        DI[Distribuidor]
-        CV[Conversas e mensagens]
-        AU[Auditoria]
-        OB[Outbox]
-        AG[API do agente]
-        SA[Saída por canal]
-        SLA[Agendador de timeouts]
+        IN[Entrada] --> TR[Triagem] --> RO[Roteador] --> DI[Distribuidor]
+        DI --> TX[transicionar]
+        AG[API do agente] --> TX
+        PA[API do painel] --> TX
+        SLA[Agendador] --> TX
+        TX --> DB[(PostgreSQL: estado, auditoria, outbox, inbox)]
+        DB --> OB[Relay da outbox]
+        OB --> SA[Saída por canal]
+        RC[Reconciliador] -. lê .-> DB
     end
 
     subgraph Integracao[Integração com o agente]
-        BR[Broker: webhook para Kafka]
+        BR[Broker: webhook e Kafka]
         K[(Kafka)]
         MK[Agente mock]
     end
 
     UI[Interface web: chat, analista, supervisor]
-    DB[(PostgreSQL)]
 
     SC & SW & SE --> IN
-    IN --> CV --> TR --> RO --> DI
-    DI --> OB --> BR --> K --> MK
-    MK --> K --> BR --> AG --> CV
-    CV --> SA --> SC & SW & SE
-    UI <--> Nucleo
-    Nucleo --- DB
+    OB -- webhook --> BR
+    BR -- publica --> K
+    K --> MK
+    MK -- responde --> K
+    K -- consome --> BR
+    BR -- HTTP --> AG
+    SA --> SC & SW & SE
+    UI --> PA
 ```
+
+`transicionar` é o único caminho que escreve na conversa (seção 11.2). O reconciliador só lê.
 
 | Componente | Responsabilidade |
 |---|---|
@@ -280,6 +310,22 @@ Garantia buscada: **entrega pelo menos uma vez + processamento idempotente em ca
 5. grava o estado, o evento de auditoria e a outbox.
 
 Complemento: índice único parcial em `conversas(id_cliente, marca)` enquanto a conversa não está resolvida, com upsert na entrada.
+
+```mermaid
+sequenceDiagram
+    participant A as Agente
+    participant N as Núcleo
+    participant G as Agendador
+    participant H as Analista
+    N->>A: conversa.atribuida (atr_41)
+    Note over A: demora além do timeout
+    G->>N: timeout_agente
+    Note over N: estado escalada, atr_41 encerrada
+    H->>N: assume a conversa
+    Note over N: estado com_humano, atribuição atual atr_42
+    A->>N: mensagem.enviada (atr_41)
+    Note over N: atr_41 diferente de atr_42: descarta e audita
+```
 
 **Base**
 - Bailis et al. (SIGMOD 2015): em 67 aplicações Rails, validações feitas só na aplicação (como unicidade) geraram duplicatas sob concorrência. Integridade precisa ficar no banco.
@@ -402,8 +448,8 @@ Violação gera alerta, métrica e evento de auditoria. No experimento, é o jui
 | `atendentes` | tipo (humano ou ia), equipe, habilidades, capacidade, status |
 | `clientes` | marca, nome sintético, segmento |
 | `identidades` | cliente, canal, identificador (telefone, e-mail, id do app) |
-| `conversas` | cliente, marca, canal, estado, categoria, prioridade, sentimento, fila, atendente, id_atribuicao_atual, versao, versao_regras |
-| `mensagens` | conversa, autor, conteúdo, canal, timestamp |
+| `conversas` | cliente, marca, canal, estado, categoria, prioridade, sentimento, fila, atendente, id_atribuicao_atual, versao, seq_outbox, versao_regras |
+| `mensagens` | conversa, autor, conteúdo, canal, id_evento, causado_por, id_atribuicao, timestamp |
 | `versoes_regras` | número, filas (JSONB), ativa, criada_por, criada_em. Imutável |
 | `filas` | nome, ordem, prioridade, condições (JSONB), atendentes, ativa, versão |
 | `atribuicoes` | id_atribuicao, conversa, fila, atendente, início, fim, motivo |
@@ -412,7 +458,10 @@ Violação gera alerta, métrica e evento de auditoria. No experimento, é o jui
 | `eventos` | log de auditoria: id_evento, tipo, ator, conversa, payload, timestamp |
 | `eventos_processados` | (consumidor, id_evento) único: inbox de cada consumidor |
 | `outbox` | evento, destino, id_conversa, sequencia, tentativas, próxima_tentativa, status |
-| `agendamentos` | tipo, conversa, executar_em, status |
+| `agendamentos` | tipo, conversa, id_atribuicao, referência, executar_em, status |
+| `violacoes` | invariante, referência, detectada_em (reconciliador) |
+
+DDL completo e ordem de criação por fatia em [`implementacao.md`](implementacao.md), seção 5.
 
 Um cliente pode ter várias identidades (o mesmo lojista no WhatsApp e no e-mail). É isso que permite a memória entre canais.
 
