@@ -90,6 +90,62 @@ Base de estudo do help desk AI first (CloudWalk / Inteli). Cada item traz o tipo
   https://doi.org/10.1145/3448016.3457556
   → Exactly-once vem de escrita idempotente e transacional. Base para idempotência no lugar de "QoS 2".
 
+## 6.1 Confiabilidade e consistência
+
+Base das decisões da seção 11 do `arquitetura.md`. Existência, autores e ideia central conferidos em 2026-11-17 pelo resumo e por fontes secundárias. **Os números citados devem ser conferidos no texto completo antes de entrar no README ou na banca.**
+
+- **Saltzer, Reed, Clark. End-to-End Arguments in System Design.** ACM TOCS 2(4), 1984 `[revisado]`
+  https://www.cs.princeton.edu/courses/archive/fall10/cos597B/papers/e2e-tocs84.pdf
+  → Detecção de duplicata, ordem e entrega garantida só ficam completas nas pontas. Base para inbox em cada consumidor (11.1), regras do broker (11.4) e reconciliador (11.6).
+
+- **Helland. Idempotence Is Not a Medical Condition.** ACM Queue 10(4), 2012; CACM 55(5) `[revisado]`
+  https://queue.acm.org/detail.cfm?id=2187821
+  → Mensagens são reenviadas; a operação precisa ter o mesmo efeito se repetida. Base para idempotência e id determinístico (11.1).
+
+- **Helland. Life beyond Distributed Transactions: an Apostate's Opinion.** CIDR 2007 `[revisado]`
+  https://ics.uci.edu/~cs223/papers/cidr07p15
+  → Sem transação distribuída, a aplicação lida com mensagem repetida e fora de ordem. Justifica outbox + idempotência em vez de 2PC.
+
+- **Richardson. Pattern: Transactional outbox.** microservices.io `[doc]`
+  https://microservices.io/patterns/data/transactional-outbox
+  → Mensagem enviada se e só se a transação confirmar; o relay pode publicar mais de uma vez. Base da outbox (11.2) e da deduplicação no consumidor (11.1).
+
+- **Bailis et al. Feral Concurrency Control: An Empirical Investigation of Modern Application Integrity.** SIGMOD 2015 `[revisado]`
+  https://amplab.cs.berkeley.edu/wp-content/uploads/2015/06/feral-sigmod2015.pdf
+  → 67 aplicações Rails: validação de unicidade feita na aplicação gera duplicata sob concorrência. Base para trava e índice único no banco (11.2).
+
+- **Warszawski, Bailis. ACIDRain: Concurrency-Related Attacks on Database-Backed Web Applications.** SIGMOD 2017 `[revisado]`
+  https://doi.org/10.1145/3035918.3064037
+  → 22 ataques críticos por concorrência em 12 aplicações de e-commerce. Mostra que condição de corrida em aplicação web tem efeito real. Base para `transicionar` e capacidade travada (11.2).
+
+- **Gray, Cheriton. Leases: An Efficient Fault-Tolerant Mechanism for Distributed File Cache Consistency.** SOSP 1989 `[revisado]`
+  https://doi.org/10.1145/74850.74870
+  → Direito com prazo como mecanismo tolerante a falhas. Origem conceitual da atribuição com validade.
+
+- **Kleppmann. How to do distributed locking.** 2016 `[mercado]`
+  https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html
+  → Fencing token: o recurso recusa escrita com token mais antigo. É o `id_atribuicao` (11.2). Blog técnico, não revisado; o autor desenvolve o tema no livro *Designing Data-Intensive Applications* (O'Reilly, 2017).
+
+- **Yuan et al. Simple Testing Can Prevent Most Critical Failures.** OSDI 2014 `[revisado]`
+  https://www.usenix.org/conference/osdi14/technical-sessions/presentation/yuan
+  → 198 falhas reais em Cassandra, HBase, HDFS, MapReduce e Redis; 92% das catastróficas vieram de tratamento errado de erro não fatal já sinalizado. Base para fila de erros com escala (11.3) e para testar o caminho de erro no experimento.
+
+- **Dai, He, Gu, Lu. Understanding Real-World Timeout Problems in Cloud Server Systems.** IC2E 2018 `[revisado]`
+  https://tingdai.github.io/files/understanding_IC2E18_slides.pdf
+  → Bugs de timeout vêm sobretudo de valor errado ou checagem ausente. Base para o agendador único (11.5). Conferido só pelos slides.
+
+- **AWS Builders' Library. Timeouts, retries, and backoff with jitter.** `[mercado]`
+  https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter
+  → Backoff exponencial com teto e jitter; retentar efeito colateral só com idempotência. Base da retentativa (11.3).
+
+- **Tang et al. Holistic Configuration Management at Facebook.** SOSP 2015 `[revisado]`
+  https://web.eecs.utk.edu/~qcao1/cs560/papers/holistic.pdf
+  → Erro de configuração é grande causa de queda; resposta com versionamento, validação de invariantes e revisão. Base da configuração versionada (seção 12).
+
+- **Basiri et al. Chaos Engineering.** IEEE Software 33(3), 2016 `[revisado]`
+  https://arxiv.org/abs/1702.05843
+  → Experimento com falhas injetadas e medida contínua de comportamento normal. Base do experimento comparativo (seção 16).
+
 ## 7. Arquitetura de software
 
 - **Auer, Lenarduzzi, Felderer, Taibi. From Monolithic Systems to Microservices: An Assessment Framework.** IST, 2021 `[revisado]`

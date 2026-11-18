@@ -223,6 +223,8 @@ JSON com JSON Schema por tipo de evento e versionamento.
   "id_evento": "evt_8f2a...",
   "tipo": "conversa.escalada",
   "id_conversa": "conv_123",
+  "id_atribuicao": "atr_41",
+  "causado_por": "evt_77c1...",
   "marca": "infinitepay",
   "timestamp": "2026-11-17T13:30:00-03:00",
   "dados": {
@@ -235,27 +237,118 @@ JSON com JSON Schema por tipo de evento e versionamento.
 
 - `id_evento`: idempotência.
 - `id_conversa`: chave de partição no Kafka. Garante ordem dentro da conversa.
+- `id_atribuicao`: qual atribuição da conversa o evento se refere. Evento com atribuição vencida é descartado (seção 11.2).
+- `causado_por`: `id_evento` que originou este. Permite id determinístico em eventos derivados (seção 11.1). Nulo quando o evento nasce de uma ação do cliente.
+
+Os dois últimos campos entram já na fatia 1, mesmo sem uso, para não exigir nova versão do contrato depois.
 
 **Tópicos Kafka (proposta)**
 - `helpdesk.para-agente`
 - `agente.para-helpdesk`
 - `helpdesk.erros` (fila de erros, *dead letter*)
 
-## 11. Confiabilidade (proposta)
+## 11. Confiabilidade e consistência (proposta)
 
-É o centro da avaliação ("robustez diante de falhas, reentregas e picos").
+É o centro da avaliação ("robustez diante de falhas, reentregas e picos"). Cada decisão abaixo responde a uma falha que o próprio experimento provoca (seção 16): evento duplicado, agente lento ou fora do ar, broker fora do ar, pico.
 
-| Risco | Solução |
+Garantia buscada: **entrega pelo menos uma vez + processamento idempotente em cada consumidor = efeito de exatamente uma vez.** Mesmo princípio do exactly-once do Kafka (escrita idempotente e transacional; Wang et al., SIGMOD 2021).
+
+### 11.1 Causalidade e idempotência em cada consumidor
+
+**Falha que evita:** `mensagem.recebida` chega duas vezes, o agente responde duas vezes com `id_evento` diferentes e o cliente recebe a resposta em dobro. Deduplicar só por `id_evento` no núcleo não pega esse caso.
+
+**Decisão**
+- Evento derivado tem id determinístico: `uuid5(causado_por, tipo, sequencia)`. Reprocessar a mesma entrada gera o mesmo id.
+- Cada consumidor (núcleo, broker, agente mock, saída por canal) tem a sua inbox: `eventos_processados(consumidor, id_evento)` com chave única, gravada na mesma transação do efeito.
+- O offset do Kafka só é confirmado depois dessa transação.
+- A saída por canal também passa pela outbox. Enviar ao WhatsApp ou e-mail é efeito externo como qualquer outro.
+
+**Base**
+- Saltzer, Reed e Clark (1984): detecção de duplicata é uma das funções que só fica completa nas pontas; a camada do meio ajuda, mas não garante.
+- Helland (2012): em sistema distribuído a mensagem é reenviada, então a operação precisa ter o mesmo efeito se executada mais de uma vez.
+- Richardson (outbox): o relay pode publicar a mesma mensagem mais de uma vez se cair entre publicar e marcar; quem consome precisa deduplicar.
+
+### 11.2 Caminho único de escrita da conversa
+
+**Falha que evita:** a resposta da IA chega depois do timeout e cai no meio do atendimento humano; duas transições simultâneas e uma apaga a outra; dois workers passam da capacidade de um analista; duas conversas abertas para o mesmo cliente.
+
+**Decisão:** toda mudança de estado passa por `transicionar(conversa, para, ator, id_atribuicao)`, numa transação só:
+1. `SELECT ... FOR UPDATE` na conversa;
+2. valida a transição em `transicoes_permitidas`;
+3. fencing: evento com `id_atribuicao` diferente do atual é descartado e auditado;
+4. ao atribuir a um atendente, trava a linha dele e confere a capacidade;
+5. grava o estado, o evento de auditoria e a outbox.
+
+Complemento: índice único parcial em `conversas(id_cliente, marca)` enquanto a conversa não está resolvida, com upsert na entrada.
+
+**Base**
+- Bailis et al. (SIGMOD 2015): em 67 aplicações Rails, validações feitas só na aplicação (como unicidade) geraram duplicatas sob concorrência. Integridade precisa ficar no banco.
+- Warszawski e Bailis (SIGMOD 2017): anomalias de concorrência em aplicações web com banco viraram ataques reais; 22 ataques críticos em 12 aplicações de e-commerce.
+- Gray e Cheriton (SOSP 1989): direito com prazo (lease) como mecanismo tolerante a falhas. Kleppmann (2016): o recurso deve recusar escrita com token mais antigo. O `id_atribuicao` é esse token.
+
+### 11.3 Ordem e falha por conversa
+
+**Falha que evita:** retentativa com backoff deixa um evento posterior da mesma conversa sair antes; evento que sempre falha trava a partição; fila de erros esconde perda.
+
+**Decisão**
+- Outbox com `id_conversa` e `sequencia`. O relay só envia um evento se não houver anterior pendente da mesma conversa.
+- Retentativas limitadas, com backoff exponencial, teto e jitter.
+- Esgotou: vai para `helpdesk.erros` e a conversa é escalada para humano com motivo `falha_integracao`. Nenhum cliente fica sem resposta por erro técnico.
+- Evento que falha no JSON Schema vai direto para `helpdesk.erros`.
+- Fila de erros com métrica, alerta e endpoint de reprocessamento.
+
+**Base**
+- Yuan et al. (OSDI 2014): 92% das falhas catastróficas estudadas em Cassandra, HBase, HDFS, MapReduce e Redis vieram de tratamento errado de erros não fatais já sinalizados. O caminho de erro é onde o sistema quebra.
+- AWS Builders' Library: backoff exponencial com teto e jitter; retentar chamada com efeito colateral só é seguro com idempotência.
+
+### 11.4 Fronteira com o broker
+
+**Falha que evita:** o broker perde mensagem em silêncio entre o webhook e o Kafka, ou entre o Kafka e o núcleo.
+
+**Decisão**
+- O broker só responde 2xx ao webhook depois do ack do Kafka (`acks=all`, produtor idempotente).
+- O broker só confirma o offset de `agente.para-helpdesk` depois do 2xx do núcleo. Com o núcleo fora, o broker para de consumir e o Kafka segura as mensagens: contrapressão, não perda.
+
+**Base:** Wang et al. (SIGMOD 2021); Saltzer, Reed e Clark (1984).
+
+### 11.5 Agendador único
+
+**Falha que evita:** timeout, SLA e outras ações com prazo implementadas cada uma num lugar, com valores e checagens diferentes.
+
+**Decisão:** tabela `agendamentos(tipo, id_conversa, executar_em, status)`, consumida por um worker com `SKIP LOCKED`, que chama `transicionar`. Nesta versão: timeout do agente e SLA. Agregação de mensagens seguidas e envelhecimento de prioridade reaproveitam a mesma peça, como evolução (seção 20).
+
+**Base:** Dai et al. (IC2E 2018) estudam bugs de timeout em sistemas servidores na nuvem e apontam valor de timeout errado e checagem de timeout ausente como as causas dominantes. Um ponto só para prazos reduz esses dois erros.
+
+### 11.6 Reconciliador
+
+**Falha que evita:** "zero mensagens perdidas" sem verificação é só uma afirmação, inclusive no experimento.
+
+**Decisão:** job periódico que confere invariantes:
+- toda mensagem de cliente tem resposta, escala ou ainda está no prazo;
+- nenhum evento pendente na outbox além de N segundos;
+- nenhuma conversa atribuída a atendente inexistente ou fora de capacidade;
+- nenhuma resposta duplicada (mesmo `causado_por` e `tipo`).
+
+Violação gera alerta, métrica e evento de auditoria. No experimento, é o juiz que conta perdas e duplicatas.
+
+**Base**
+- Saltzer, Reed e Clark (1984): a verificação que garante o resultado é a de ponta a ponta.
+- Basiri et al. (IEEE Software 2016): experimentar com falhas em sistema distribuído exige uma medida contínua do comportamento normal para comparar antes e depois.
+
+### 11.7 Resumo
+
+| Risco | Decisão |
 |---|---|
-| Plataforma salva a conversa mas cai antes de avisar o agente | **Outbox transacional:** o evento é gravado numa tabela `outbox` na mesma transação da mudança de estado. Um processo separado envia e marca como enviado |
-| Webhook para o broker falha | Retentativa com backoff exponencial. Depois de N tentativas, vai para a fila de erros |
-| Evento chega duplicado (reentrega do Kafka ou do webhook) | **Idempotência:** tabela `eventos_processados` com `id_evento` único. Duplicado é ignorado |
-| Mensagens da mesma conversa fora de ordem | Partição do Kafka por `id_conversa` |
-| Agente não responde | Agendador de timeouts escala para humano com motivo `timeout_agente` |
-| Evento malformado | Validação pelo JSON Schema; inválido vai para a fila de erros |
-| Pico de volume | Kafka absorve a fila; workers consomem no ritmo que aguentam |
-
-Garantia resultante: **pelo menos uma vez na entrega + idempotência no processamento = efeito de exatamente uma vez.** Mesmo princípio do exactly-once do Kafka (escrita idempotente e transacional; Wang et al., SIGMOD 2021).
+| Plataforma salva a conversa e cai antes de avisar o agente | Outbox transacional (11.2) |
+| Evento duplicado em qualquer salto | Inbox por consumidor + id determinístico (11.1) |
+| Resposta atrasada depois de timeout ou troca de dono | Fencing por `id_atribuicao` (11.2) |
+| Transições ou atribuições concorrentes | `transicionar` com trava e capacidade (11.2) |
+| Mensagens da mesma conversa fora de ordem | Partição por `id_conversa` + ordem na outbox (11.3) |
+| Evento que sempre falha | Retentativa limitada, fila de erros, escala para humano (11.3) |
+| Broker cai ou núcleo cai | Ack só depois do Kafka; offset só depois do núcleo (11.4) |
+| Agente não responde | Agendador escala com `timeout_agente` (11.5) |
+| Perda que ninguém vê | Reconciliador (11.6) |
+| Pico de volume | Kafka absorve; workers consomem no ritmo que aguentam |
 
 ## 12. Filas e distribuição
 
@@ -281,13 +374,23 @@ Garantia resultante: **pelo menos uma vez na entrega + idempotência no processa
 
 **Roteamento (decidida):** filas testadas em ordem; a primeira que casa leva; sem match vai para a fila padrão (modelo Zendesk).
 
-**Ordem dentro da fila (proposta):** prioridade primeiro, depois tempo de espera. Com **envelhecimento**: a prioridade efetiva cresce com o tempo na fila, para um atendimento de prioridade baixa nunca ficar esquecido.
+**Ordem dentro da fila (proposta):** prioridade primeiro, depois tempo de espera. O **envelhecimento** (prioridade efetiva crescendo com o tempo na fila) fica como evolução (seção 20).
 
 **Distribuição (proposta):** cada atendente tem capacidade (humano: ex. 3 conversas simultâneas; IA: limite configurável por custo). Quando um atendente cobre várias filas, pega primeiro da fila de maior prioridade. A IA é um atendente cadastrado como qualquer outro, com `tipo = ia`.
 
 **Handoff:** o evento `conversa.escalada` traz motivo e resumo. A conversa entra na fila de escalas com o histórico completo. O analista não pergunta de novo o que o cliente já contou.
 
-**Gatilhos de escala (proposta):** pedido do agente, pedido explícito do cliente, sentimento negativo (cedo, antes de piorar; estudo de campo do Alibaba), timeout do agente.
+**Gatilhos de escala (proposta):** pedido do agente, pedido explícito do cliente, sentimento negativo (cedo, antes de piorar; estudo de campo do Alibaba), timeout do agente, falha de integração (seção 11.3).
+
+**Resumo de reserva (proposta):** quando a escala vem de timeout ou falha, não há resumo do agente. A plataforma monta um com os campos da triagem e as últimas N mensagens.
+
+**Configuração segura (proposta):** editar sem deploy também permite quebrar sem deploy.
+- Cada edição de filas gera uma versão nova e imutável. Ativar é atômico; rollback é reativar a versão anterior.
+- Antes de ativar, validação: toda condição usa campo e operador conhecidos e existe fila padrão.
+- Cada conversa guarda a versão de regras com que foi roteada. A auditoria responde "por que este atendimento foi para esta fila".
+- `marca` em todas as tabelas e consultas, com teste automatizado que tenta ler dados de outra marca.
+
+**Base:** Tang et al. (SOSP 2015) descrevem erro de configuração como uma das principais causas de queda no Facebook, por causa da frequência de mudanças e do erro humano; a resposta foi configuração versionada, validação automática de invariantes e revisão.
 
 ## 13. Modelo de dados (proposta)
 
@@ -299,16 +402,21 @@ Garantia resultante: **pelo menos uma vez na entrega + idempotência no processa
 | `atendentes` | tipo (humano ou ia), equipe, habilidades, capacidade, status |
 | `clientes` | marca, nome sintético, segmento |
 | `identidades` | cliente, canal, identificador (telefone, e-mail, id do app) |
-| `conversas` | cliente, marca, canal, estado, categoria, prioridade, sentimento, fila, atendente |
+| `conversas` | cliente, marca, canal, estado, categoria, prioridade, sentimento, fila, atendente, id_atribuicao_atual, versao, versao_regras |
 | `mensagens` | conversa, autor, conteúdo, canal, timestamp |
+| `versoes_regras` | número, filas (JSONB), ativa, criada_por, criada_em. Imutável |
 | `filas` | nome, ordem, prioridade, condições (JSONB), atendentes, ativa, versão |
-| `atribuicoes` | conversa, fila, atendente, início, fim, motivo |
+| `atribuicoes` | id_atribuicao, conversa, fila, atendente, início, fim, motivo |
+| `transicoes_permitidas` | estado de origem, estado de destino, quem pode disparar |
 | `escalas` | conversa, motivo, resumo, prioridade |
 | `eventos` | log de auditoria: id_evento, tipo, ator, conversa, payload, timestamp |
-| `eventos_processados` | id_evento único (idempotência) |
-| `outbox` | evento, destino, tentativas, status |
+| `eventos_processados` | (consumidor, id_evento) único: inbox de cada consumidor |
+| `outbox` | evento, destino, id_conversa, sequencia, tentativas, próxima_tentativa, status |
+| `agendamentos` | tipo, conversa, executar_em, status |
 
 Um cliente pode ter várias identidades (o mesmo lojista no WhatsApp e no e-mail). É isso que permite a memória entre canais.
+
+**Fusão de identidades (proposta):** só com evidência forte, como login no app ou telefone verificado. Sem ela, os clientes ficam separados. Fundir errado mostra o histórico de um lojista para outro.
 
 ## 14. Stack (proposta)
 
@@ -349,14 +457,25 @@ Um cliente pode ter várias identidades (o mesmo lojista no WhatsApp e no e-mail
 
 ## 16. Experimento técnico (proposta)
 
-**Hipótese:** a plataforma sustenta 100 msg/s com p95 de latência interna abaixo de 500 ms e zero mensagens perdidas ou duplicadas, inclusive com reentregas forçadas e com o agente fora do ar.
+**Por que comparativo:** Postgres e Redpanda sustentam 100 msg/s numa máquina local sem esforço, então "aguentou a carga" prova pouco. O que precisa ser provado é que cada decisão da seção 11 evita uma falha real.
+
+**Hipótese:** sob a mesma carga e as mesmas falhas injetadas, a versão robusta tem zero mensagens perdidas e zero respostas duplicadas, e a versão ingênua não. A versão robusta mantém p95 de latência interna abaixo de 500 ms a 100 msg/s.
+
+**Versões comparadas**
+- **Ingênua:** a fatia 1. Publica direto no Kafka, sem outbox, inbox nem fencing.
+- **Robusta:** a plataforma depois da fatia 3, com tudo da seção 11.
 
 **Método**
 1. Gerar carga crescente com k6 até 100 msg/s, com um pico de 5x por alguns minutos.
-2. Injetar falhas: derrubar o agente mock, derrubar o broker, reenviar eventos duplicados.
-3. Medir as métricas técnicas e conferir contagens no banco (enviadas = processadas, sem duplicata).
+2. Injetar as mesmas falhas nas duas versões: derrubar o agente mock, derrubar o broker, derrubar o núcleo no meio de uma transação, reenviar eventos duplicados, atrasar o agente além do timeout.
+3. O reconciliador (seção 11.6) conta perdas, duplicatas e respostas fora de dono em cada versão.
+4. Medir latência, throughput, atraso do consumidor e tempo de recuperação.
 
-**Limitações já conhecidas:** ambiente local, não produção; agente mock com latência simulada; dados sintéticos; premissas de 12 mensagens e pico de 5x.
+**Resultado esperado:** uma tabela por falha injetada, com perdas e duplicatas nas duas versões. Cada linha liga uma decisão de arquitetura a uma falha que ela evita.
+
+**Base:** Basiri et al. (IEEE Software 2016), experimentação com falhas injetadas e medida de estado estável; Yuan et al. (OSDI 2014), testar o caminho de erro.
+
+**Limitações já conhecidas:** ambiente local, não produção; agente mock com latência simulada; dados sintéticos; premissas de 12 mensagens e pico de 5x; a versão ingênua é construída por nós, então representa um sistema sem essas proteções, não o help desk atual da CloudWalk.
 
 **Alternativa ou complemento:** avaliação da distribuição de filas com o simulador de regras (D3).
 
@@ -376,14 +495,15 @@ Três decisões do núcleo deixam os diferenciais baratos: log de eventos (D2, D
 
 Fatias verticais: cada uma funciona de ponta a ponta antes da próxima.
 
-1. **Esqueleto:** Docker Compose com Postgres, Redpanda, núcleo e agente mock. Uma mensagem de chat vai e volta.
-2. **Confiabilidade:** outbox, idempotência, retentativa, fila de erros, timeout.
-3. **Filas:** roteador, distribuidor, configuração pela interface.
-4. **Humano:** handoff, painel do analista, devolução para a IA.
-5. **Canais e memória:** WhatsApp e e-mail simulados, identidades, reabertura.
-6. **Experimento:** carga, injeção de falhas, análise.
-7. **Diferenciais** escolhidos na fase 2.
-8. **README e demonstração.**
+1. **Esqueleto:** Docker Compose com Postgres, Redpanda, núcleo e agente mock. Uma mensagem de chat vai e volta. O envelope já leva `id_atribuicao` e `causado_por`. Esta versão vira a versão ingênua do experimento.
+2. **Confiabilidade A:** `transicionar` (11.2), outbox e inbox por consumidor (11.1), regras do broker (11.4).
+3. **Confiabilidade B:** agendador com timeout e SLA (11.5), ordem e fila de erros com escala (11.3), reconciliador (11.6).
+4. **Filas:** roteador, distribuidor, configuração versionada pela interface.
+5. **Humano:** handoff, painel do analista, devolução para a IA.
+6. **Canais e memória:** WhatsApp e e-mail simulados, identidades, reabertura.
+7. **Experimento:** carga, injeção de falhas, comparação ingênua × robusta.
+8. **Diferenciais** escolhidos na fase 2.
+9. **README e demonstração.**
 
 ## 19. Decisões
 
@@ -398,6 +518,27 @@ Fatias verticais: cada uma funciona de ponta a ponta antes da próxima.
 | 7 | Contrato JSON com schema e versão; Kafka particionado por conversa | Decidida |
 | 8 | Monólito modular; broker e agente mock fora do núcleo | Proposta |
 | 9 | Outbox + idempotência + fila de erros | Proposta |
-| 10 | Envelhecimento de prioridade na fila | Proposta |
+| 10 | Envelhecimento de prioridade na fila | Evolução (seção 20) |
 | 11 | Python + FastAPI, Postgres, Redpanda, Next.js (Ruby como migração futura) | Decidida |
-| 12 | Hipótese do experimento (100 msg/s, p95 < 500 ms, zero perda) | Proposta |
+| 12 | Experimento comparativo ingênua × robusta (zero perda e duplicata só na robusta; p95 < 500 ms a 100 msg/s) | Proposta |
+| 13 | Envelope com `id_atribuicao` e `causado_por` desde a fatia 1 | Proposta |
+| 14 | Inbox por consumidor e id determinístico em eventos derivados | Proposta |
+| 15 | Caminho único de escrita (`transicionar`) com trava, transições permitidas e fencing | Proposta |
+| 16 | Ordem por conversa na outbox; retentativa limitada; fila de erros escala para humano | Proposta |
+| 17 | Broker confirma só depois do Kafka e do núcleo | Proposta |
+| 18 | Agendador único para prazos | Proposta |
+| 19 | Reconciliador de invariantes | Proposta |
+| 20 | Regras de fila versionadas, com validação e rollback | Proposta |
+
+## 20. Evolução
+
+Fica fora do mês, salvo sobra de tempo. Entra nas limitações do README.
+
+| Item | Por que ficou para depois |
+|---|---|
+| Agregação de mensagens seguidas antes de despachar ao agente | Ganho de produto, não de robustez. Reaproveita o agendador |
+| Envelhecimento de prioridade | Reaproveita o agendador; no volume de referência a fila raramente envelhece |
+| Row-Level Security por marca no Postgres | O filtro por `marca` com teste cobre o mês; RLS é a defesa em profundidade |
+| Tela de fusão de identidades para o analista | A regra conservadora (seção 13) já evita o vazamento |
+| Tela de reprocessamento da fila de erros | O endpoint basta para o experimento |
+| Triagem com classificador próprio e abstenção calibrada | Em discussão. Ideia: regressão logística sobre TF-IDF, faixas de confiança e fila de triagem humana; regras como plano B (Mozannar e Sontag, ICML 2020) |

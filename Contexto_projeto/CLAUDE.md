@@ -53,9 +53,10 @@ Projeto individual do Inteli com a CloudWalk (dona da InfinitePay no Brasil e da
 7. **Campos das condições:** marca, canal, categoria, prioridade, idioma, segmento_cliente, sentimento, origem. Operadores: igual, diferente, em. Combinação: todas ou qualquer.
 8. **Contrato com o agente em JSON**, com JSON Schema por tipo de evento e versionamento. Kafka particionado por `id_conversa` (ordem garantida dentro da conversa).
 9. **Monólito modular.** Broker e agente mock ficam fora do núcleo, porque espelham a fronteira real com a CloudWalk e o experimento vai derrubá-los de propósito.
-10. **Confiabilidade:** outbox transacional, idempotência por `id_evento`, retentativa com backoff, fila de erros (dead letter), timeout do agente escalando para humano.
+10. **Confiabilidade (seção 11 da arquitetura):** outbox transacional; inbox por consumidor com id determinístico em eventos derivados; caminho único de escrita `transicionar` com trava, transições permitidas e fencing por `id_atribuicao`; ordem por conversa na outbox; retentativa limitada com fila de erros que escala para humano; broker confirma só depois do Kafka e do núcleo; agendador único para prazos; reconciliador de invariantes.
 11. **Roteador é função pura** (atendimento + regras → fila), sem efeitos colaterais. Facilita testes e o simulador de regras (diferencial D3).
 12. **Stack:** Python. Ruby (linguagem da CloudWalk) fica como migração futura; para isso os componentes só conversam por HTTP, Kafka e JSON Schema.
+13. **Experimento comparativo:** a fatia 1 é a versão ingênua; a plataforma depois da fatia 3 é a robusta. Mesmas falhas nas duas; o reconciliador conta perdas e duplicatas.
 
 ## Stack
 
@@ -88,6 +89,8 @@ Distribuição de atendimentos com `SELECT ... FOR UPDATE SKIP LOCKED` no Postgr
   "id_evento": "evt_8f2a...",
   "tipo": "conversa.escalada",
   "id_conversa": "conv_123",
+  "id_atribuicao": "atr_41",
+  "causado_por": "evt_77c1...",
   "marca": "infinitepay",
   "timestamp": "2026-11-17T13:30:00-03:00",
   "dados": {}
@@ -100,14 +103,15 @@ Nomes de eventos, campos e tabelas em português, como acima.
 
 ## Plano de construção (fatias verticais)
 
-1. **Esqueleto:** uma mensagem de chat vai e volta de ponta a ponta. ← **ESTAMOS AQUI**
-2. **Confiabilidade:** outbox, idempotência, retentativa, fila de erros, timeout.
-3. **Filas:** roteador, distribuidor, configuração.
-4. **Humano:** handoff, painel do analista, devolução para a IA.
-5. **Canais e memória:** WhatsApp e e-mail simulados, identidades, reabertura.
-6. **Experimento:** carga, injeção de falhas, análise.
-7. **Diferenciais** (escolhidos na fase 2).
-8. **README e demonstração.**
+1. **Esqueleto:** uma mensagem de chat vai e volta de ponta a ponta. Vira a versão ingênua do experimento. ← **ESTAMOS AQUI**
+2. **Confiabilidade A:** `transicionar`, outbox, inbox por consumidor, regras do broker.
+3. **Confiabilidade B:** agendador (timeout e SLA), ordem e fila de erros com escala, reconciliador.
+4. **Filas:** roteador, distribuidor, configuração versionada.
+5. **Humano:** handoff, painel do analista, devolução para a IA.
+6. **Canais e memória:** WhatsApp e e-mail simulados, identidades, reabertura.
+7. **Experimento:** carga, injeção de falhas, comparação ingênua × robusta.
+8. **Diferenciais** (escolhidos na fase 2).
+9. **README e demonstração.**
 
 ## Fatia 1: especificação
 
@@ -116,9 +120,9 @@ Nomes de eventos, campos e tabelas em português, como acima.
 **Escopo:**
 - `docker-compose.yml` com Postgres, Redpanda, núcleo e agente mock.
 - Só 3 tabelas: `clientes`, `conversas`, `mensagens`. As outras entram nas próximas fatias.
-- Envelope do contrato em Pydantic.
+- Envelope do contrato em Pydantic, já com `id_atribuicao` e `causado_por` (podem ficar nulos nesta fatia).
 - Agente mock simples: responde um texto fixo.
-- Nesta fatia o núcleo pode publicar direto no Kafka. O broker separado (webhook → Kafka) e a outbox entram na fatia 2. Deixe isso explícito no código como ponto de evolução.
+- Nesta fatia o núcleo pode publicar direto no Kafka. O broker separado (webhook → Kafka) e a outbox entram na fatia 2. Deixe isso explícito no código como ponto de evolução. Guarde esta versão (tag git `ingenua`): ela é a linha de base do experimento.
 
 **Fora da fatia 1:** filas, humano, interface web, outbox, idempotência.
 
