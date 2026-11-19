@@ -146,7 +146,7 @@ helpdesk-ai-first/
 ```
 
 **Ordem de entrega dentro da fatia:**
-1. `docker-compose.yml` + tabelas + migration. Eu rodo e confirmo que subiu.
+1. `docker-compose.yml` + tabelas + migration. Eu rodo e confirmo que subiu. ← feito
 2. API de mensagens + publicação no Kafka.
 3. Agente mock + caminho de volta.
 4. Teste de ponta a ponta.

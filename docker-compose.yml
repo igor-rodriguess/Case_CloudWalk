@@ -1,0 +1,71 @@
+name: helpdesk
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: helpdesk
+      POSTGRES_USER: ${POSTGRES_USER:-helpdesk}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-helpdesk}
+    ports:
+      - "${POSTGRES_PORTA:-5433}:5432"
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./infra/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d helpdesk"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:${REDPANDA_VERSAO:-v24.2.7}
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container
+      - --smp=1
+      - --memory=512M
+      - --kafka-addr=interno://0.0.0.0:9092,externo://0.0.0.0:19092
+      - --advertise-kafka-addr=interno://redpanda:9092,externo://localhost:19092
+    ports:
+      - "${KAFKA_PORTA:-19092}:19092"
+    volumes:
+      - redpanda:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true'"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  # Cria os tópicos uma vez e termina.
+  topicos:
+    image: docker.redpanda.com/redpandadata/redpanda:${REDPANDA_VERSAO:-v24.2.7}
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        B="-X brokers=redpanda:9092"
+        rpk topic create helpdesk.para-agente agente.para-helpdesk -p 12 $$B || true
+        rpk topic create helpdesk.erros -p 3 $$B || true
+        rpk topic describe helpdesk.para-agente agente.para-helpdesk helpdesk.erros $$B -p > /dev/null
+        rpk topic list $$B
+
+  # Aplica as migrations e termina.
+  migracoes:
+    build:
+      context: .
+      dockerfile: nucleo/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-helpdesk}:${POSTGRES_PASSWORD:-helpdesk}@postgres:5432/helpdesk
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+
+volumes:
+  postgres:
+  redpanda:

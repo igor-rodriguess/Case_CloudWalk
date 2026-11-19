@@ -33,8 +33,10 @@ helpdesk-ai-first/
 
 | Serviço | Porta | Papel |
 |---|---|---|
-| `postgres` | 5432 | Banco do núcleo (database `helpdesk`) e do mock (database `agente_mock`) |
-| `redpanda` | 9092 | Kafka |
+| `postgres` | 5433 no host, 5432 na rede do compose | Banco do núcleo (database `helpdesk`) e do mock (database `agente_mock`) |
+| `redpanda` | 19092 no host, 9092 na rede do compose | Kafka |
+| `topicos` | — | Cria os tópicos e termina |
+| `migracoes` | — | Roda `alembic upgrade head` e termina |
 | `nucleo` | 8000 | API e workers (relay da outbox, agendador) |
 | `broker` | 8100 | `POST /webhook` e consumidor de `agente.para-helpdesk` |
 | `agente_mock` | 8200 | Consumidor de `helpdesk.para-agente`; `GET /saude` e `POST /modo` para o experimento |
@@ -42,7 +44,9 @@ helpdesk-ai-first/
 
 O mock tem banco próprio para não ler nem escrever nas tabelas do núcleo, como o agente real.
 
-Bibliotecas: FastAPI, SQLAlchemy 2.0 assíncrono com asyncpg, Alembic, Pydantic v2, aiokafka, httpx, pytest. Fixar as versões das imagens no compose.
+As portas do host fogem de 5432 e 9092 para não colidir com outros projetos na mesma máquina.
+
+Bibliotecas: FastAPI, SQLAlchemy 2.0, psycopg 3 (um driver só, síncrono para o Alembic e assíncrono para a API), Alembic, Pydantic v2, aiokafka, httpx, pytest. Fixar as versões das imagens no compose.
 
 ## 3. Kafka
 
