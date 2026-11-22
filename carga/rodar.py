@@ -56,11 +56,12 @@ def preparar(cenario: str, posicao: str) -> dict:
 
 
 async def executar(cenario: str, posicao: str, aquecimento: float, medicao: float, drenagem: float,
-                   semente: int) -> dict:
+                   semente: int, conversas_por_s: float = 8.3) -> dict:
     chaves = preparar(cenario, posicao)
     execucao = f"{cenario}-{posicao}-{int(time.time())}"
     duracao = aquecimento + medicao
-    agenda = gerar(execucao, duracao, semente=semente, frac_reenvio=0.1 if cenario == "E3b" else 0.0)
+    agenda = gerar(execucao, duracao, semente=semente, conversas_por_s=conversas_por_s,
+                   frac_reenvio=0.1 if cenario == "E3b" else 0.0)
     inicio = time.time() + 2
     tarefas = [reproduzir(agenda, NUCLEO, inicio)]
     if cenario == "E6":
@@ -69,7 +70,8 @@ async def executar(cenario: str, posicao: str, aquecimento: float, medicao: floa
     registros, falha = resultados[0], (resultados[1] if cenario == "E6" else None)
     await asyncio.sleep(drenagem)
     metricas, linhas = julgar(registros, aquecimento, duracao, falha)
-    metricas.update(cenario=cenario, posicao=posicao, chaves=chaves, aquecimento_s=aquecimento,
+    metricas.update(cenario=cenario, posicao=posicao, chaves=chaves, conversas_por_s=conversas_por_s,
+                    msg_por_s_total=round(conversas_por_s * 6 * 2, 1), aquecimento_s=aquecimento,
                     medicao_s=medicao, semente=semente, envios_agenda=len(agenda), falha=falha,
                     execucao=execucao)
     pasta = RESULTADOS / cenario / posicao

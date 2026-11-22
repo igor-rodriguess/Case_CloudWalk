@@ -69,7 +69,7 @@ Mede a robustez da plataforma, não a qualidade das respostas do agente.
 
 - **Ablação:** uma versão só, com chaves que desligam cada proteção. Cada cenário roda com a chave que ele testa ligada e desligada.
 - **Cenários:** E1 base (outbox e inbox juntas), E3b reenvio de 10% das mensagens pelo canal 2 s depois (inbox), E6 broker fora por 60 s (outbox).
-- **Carga:** 8,3 conversas novas por segundo, 6 mensagens cada, 84 s entre elas; 100 msg/s nas duas direções em regime. 7 min de aquecimento e 5 min medidos. Agenda com semente fixa (`carga/agenda.py`).
+- **Carga:** 6 mensagens por conversa, 84 s entre elas, 7 min de aquecimento e 5 min medidos, agenda com semente fixa (`carga/agenda.py`). A meta era 100 msg/s (8,3 conversas/s); nesta máquina o sistema sustentou cerca de 35 msg/s de cliente (70 no total) antes de recusar, então as execuções rodam no plano B do documento: **50 msg/s nas duas direções (4,15 conversas/s)**.
 - **Juiz nas pontas:** conta o que o cliente enviou e o que o canal entregou; liga cada resposta à mensagem pelo banco do núcleo.
 
 ```bash
@@ -97,6 +97,7 @@ RESULTADOS_AQUI
 - Sem inatividade: conversa com humano esperando o cliente ocupa vaga até o analista encerrar.
 - O juiz depende do banco do núcleo para ligar resposta a mensagem e supõe uma resposta antes da mensagem seguinte da conversa.
 - Uma repetição por cenário e posição: sem variância; vale zero contra não zero e a ordem de grandeza.
+- Carga medida a 50 msg/s, não a 100: numa máquina só, com gerador, broker, Kafka, Postgres e mock juntos, o sistema começou a recusar perto de 70 msg/s no total. A meta de 100 msg/s fica sem evidência.
 - Na configuração do experimento a IA não tem limite de capacidade (a capacidade como limite de custo está em evolução).
 - Cenários fora da entrega: rampa até 200 msg/s, duplicatas do agente, agente lento e fora como cenário medido, núcleo morto, disjuntor, escalabilidade horizontal. Desenho e previsão em `docs/implementacao.md`, seção 14.
 

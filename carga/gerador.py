@@ -54,6 +54,6 @@ async def reproduzir(agenda: list[Envio], nucleo: str, inicio: float | None = No
             espera = inicio + reg.envio.t - time.time()
             if espera > 0:
                 await asyncio.sleep(espera)
-            tarefas.append(asyncio.create_task(_enviar(cliente, url, reg.envio, reg)))
-        await asyncio.gather(*tarefas)
+            tarefas.append(asyncio.create_task(asyncio.wait_for(_enviar(cliente, url, reg.envio, reg), 30)))
+        await asyncio.gather(*tarefas, return_exceptions=True)
     return registros
