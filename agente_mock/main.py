@@ -151,14 +151,29 @@ async def consumir() -> None:
                 consumidor.resume(*consumidor.paused())
             lotes = await consumidor.getmany(timeout_ms=500, max_records=200)
             for tp, mensagens in lotes.items():
+                ultimo_ok = None
                 for msg in mensagens:
                     try:
                         env = Envelope.model_validate_json(msg.value)
-                        await _tratar(conn, env)
                     except Exception:
-                        log.exception("evento ignorado no offset %s", msg.offset)
-                if mensagens:
-                    await consumidor.commit({tp: mensagens[-1].offset + 1})
+                        log.warning("evento inválido ignorado no offset %s", msg.offset)
+                        ultimo_ok = msg.offset  # malformado não melhora com nova tentativa
+                        continue
+                    try:
+                        await _tratar(conn, env)
+                        ultimo_ok = msg.offset
+                    except Exception:
+                        # Falha do banco: não confirma; volta a esta mensagem com conexão nova.
+                        log.exception("falha no offset %s; tentando de novo", msg.offset)
+                        consumidor.seek(tp, msg.offset)
+                        try:
+                            await conn.close()
+                        finally:
+                            await asyncio.sleep(1)
+                            conn = await psycopg.AsyncConnection.connect(BANCO, autocommit=True)
+                        break
+                if ultimo_ok is not None:
+                    await consumidor.commit({tp: ultimo_ok + 1})
     finally:
         await consumidor.stop()
         await conn.close()

@@ -100,7 +100,8 @@ async def assumir(id_conversa: uuid.UUID, corpo: Analista):
 
 
 async def _dono(s, id_conversa, id_atendente) -> None:
-    r = await s.execute(text("SELECT estado, id_atendente FROM conversas WHERE id = :c"), {"c": id_conversa})
+    r = await s.execute(text("SELECT estado, id_atendente FROM conversas WHERE id = :c FOR UPDATE"),
+                        {"c": id_conversa})
     c = r.mappings().first()
     if c is None:
         raise HTTPException(404, "conversa não existe")

@@ -95,12 +95,27 @@ async def volta(produtor: AIOKafkaProducer) -> None:
         await http.aclose()
 
 
+async def supervisionar(produtor: AIOKafkaProducer) -> None:
+    """Reinicia o caminho de volta se ele cair. O consumidor recomeça do último offset
+    confirmado: nada se perde, no máximo reentrega (a inbox do núcleo absorve)."""
+    while True:
+        try:
+            estado["volta_ativa"] = True
+            await volta(produtor)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            estado["volta_ativa"] = False
+            log.exception("caminho de volta caiu; reiniciando em 2 s")
+            await asyncio.sleep(2)
+
+
 @asynccontextmanager
 async def ciclo_de_vida(app: FastAPI):
     produtor = AIOKafkaProducer(bootstrap_servers=KAFKA, acks="all", enable_idempotence=True)
     await produtor.start()
     estado["produtor"] = produtor
-    tarefa = asyncio.create_task(volta(produtor))
+    tarefa = asyncio.create_task(supervisionar(produtor))
     yield
     tarefa.cancel()
     await produtor.stop()
@@ -128,4 +143,6 @@ async def webhook(request: Request):
 
 @app.get("/saude")
 async def saude():
+    if not estado.get("volta_ativa", True):
+        return JSONResponse(status_code=503, content={"ok": False, "volta": "reiniciando"})
     return {"ok": True}

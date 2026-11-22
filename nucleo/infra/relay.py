@@ -124,15 +124,15 @@ async def _processar_um() -> bool:
                 text("UPDATE outbox SET status = 'erro', tentativas = :t, ultimo_erro = :e WHERE id = :id"),
                 {"t": tentativas, "e": erro, "id": item["id"]},
             )
-    log.warning("outbox %s esgotou as tentativas: %s", item["id"], erro)
-    if item["destino"] == "broker" and item["id_atribuicao"]:
-        from nucleo.dominio.acoes import escalar
-        from nucleo.dominio.transicionar import SISTEMA
-        from nucleo.infra.banco import unidade
+            # A escala vai na mesma transação do 'erro': se o processo cair aqui, nenhum dos dois fica.
+            if item["destino"] == "broker" and item["id_atribuicao"]:
+                from nucleo.dominio.acoes import escalar
+                from nucleo.dominio.transicionar import SISTEMA
 
-        async with unidade() as s:
-            await escalar(s, item["id_conversa"], SISTEMA, "falha_integracao",
-                          id_atribuicao=item["id_atribuicao"], causado_por=item["id_evento"])
+                s.info.setdefault("diretos", [])
+                await escalar(s, item["id_conversa"], SISTEMA, "falha_integracao",
+                              id_atribuicao=item["id_atribuicao"], causado_por=item["id_evento"])
+    log.warning("outbox %s esgotou as tentativas: %s", item["id"], erro)
     return True
 
 

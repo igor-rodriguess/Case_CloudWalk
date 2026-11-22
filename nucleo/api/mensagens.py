@@ -68,8 +68,10 @@ async def _processar(s, m: MensagemEntrada, id_externo: str) -> MensagemAceita:
     id_cliente = await _cliente(s, m)
     r = await s.execute(
         text(
+            # FOR UPDATE: se a conversa for resolvida enquanto esperamos a trava, o Postgres reavalia
+            # o filtro e ela não volta; a mensagem abre conversa nova em vez de cair numa resolvida.
             "SELECT id, estado FROM conversas WHERE id_cliente = :c AND marca = :m AND estado <> 'resolvida' "
-            "ORDER BY criada_em DESC LIMIT 1"
+            "ORDER BY criada_em DESC LIMIT 1 FOR UPDATE"
         ),
         {"c": id_cliente, "m": m.marca},
     )
