@@ -1,117 +1,98 @@
 # Diferenciais
 
-Ideias além do que o TAPI exige. Ainda são propostas: a priorização final acontece na fase 2, depois da arquitetura fechada.
+Ideias além do que o TAPI exige. Nenhuma entra na entrega de 23/11 (decisão D-2, 2026-11-20, e plano de 2 dias, arquitetura 19.1). O D6 foi aprovado pelo usuário e fica como Evolução, inclusive a versão reduzida.
 
 | # | Diferencial | Esforço | Reaproveita do núcleo |
 |---|---|---|---|
-| D1 | Persona da IA por marca | Pequeno | Cadastro de marcas, evento `conversa.atribuida` |
+| D1 | Persona da IA por marca | Pequeno | Cadastro de marcas, `conversa.atribuida` |
 | D2 | Fila de qualidade | Pequeno/médio | Motor de filas, auditoria |
-| D3 | Simulador de regras de fila | Médio | Roteador, histórico de atendimentos |
+| D3 | Simulador de regras de fila | Médio | Roteador puro, registros de decisão |
 | D4 | Painel ao vivo do supervisor | Médio | Log de eventos |
 | D5 | Copiloto do analista | Médio | Contrato com o agente, painel do analista |
+| D6 | Memória semântica | Médio | `transicionar`, contrato versionado, Postgres |
 
 ---
 
 ## D1. Persona da IA por marca
 
-**O que é:** cada marca tem a sua forma de falar. A InfinitePay atende em português, com tom próximo; a JIM atende em inglês, com outro tom. O agente não é nosso, mas a plataforma guarda essa configuração e entrega ao agente.
+**O que é:** cada marca tem a sua forma de falar (InfinitePay em português, tom próximo; JIM em inglês, outro tom). A plataforma guarda a configuração e a entrega ao agente.
 
-**Como funciona:**
-1. O supervisor cadastra a persona da marca: idioma, tom, nome do atendente, assinatura, mensagem padrão de handoff e limites de ação (ex.: valor máximo que a IA pode executar sozinha).
-2. Quando uma conversa cai para a IA, o evento `conversa.atribuida` leva a persona em `dados.persona`.
-3. O agente mock usa a persona para montar a resposta.
-4. A auditoria registra qual versão da persona atendeu cada conversa.
+**Como funciona:** o supervisor cadastra idioma, tom, nome do atendente, mensagem de handoff e limites de ação; `conversa.atribuida` leva a persona em `dados.persona`; o mock a usa; a auditoria registra a versão da persona em cada conversa.
 
-**O que muda na arquitetura:** uma tabela `personas` ligada a `marcas`, com versionamento. Nenhum componente novo.
+**Muda na arquitetura:** tabela `personas` ligada a `marcas`, versionada.
 
-**Por que vale:** transforma o multi-marca em algo real, e não só num filtro. É barato e aparece bem na demonstração.
-
-**Como medir:** teste automatizado garantindo que cada marca recebe a persona certa; trocar a persona e ver o efeito na resposta.
-
----
+**Como medir:** teste que cada marca recebe a persona certa; trocar a persona e ver o efeito.
 
 ## D2. Fila de qualidade
 
-**O que é:** uma amostra das conversas resolvidas pela IA passa por revisão humana. Responde ao achado do τ-bench: o agente acerta muitas vezes, mas não sempre.
+**O que é:** amostra das conversas resolvidas pela IA vai para revisão humana. Responde ao τ-bench: o agente acerta muitas vezes, mas não sempre.
 
-**Como funciona:**
-1. Quando a IA resolve uma conversa, a plataforma sorteia se ela vai para revisão. A taxa é configurável por marca e categoria (ex.: 5% no geral, 20% em crédito).
-2. A conversa sorteada entra numa fila "Revisão de qualidade". É uma fila comum, com a condição `origem = amostra_qualidade`.
-3. O revisor avalia com uma rubrica curta: a resposta estava correta? O tom estava adequado? Deveria ter escalado?
-4. O resultado vira uma taxa de erro por categoria. Se uma categoria errar demais, o supervisor muda a regra e passa a mandá-la direto para humanos.
+**Como funciona:** ao resolver, a plataforma sorteia (taxa por marca e categoria, ex.: 5% no geral, 20% em crédito; valores de exemplo); a sorteada entra numa fila comum com `origem = amostra_qualidade`; o revisor usa uma rubrica curta; o resultado vira taxa de erro por categoria, que orienta mudar a regra.
 
-**O que muda na arquitetura:** quase nada. Reaproveita o motor de filas; só entra um novo valor em `origem` e uma tabela de avaliações.
+**Muda na arquitetura:** um valor novo em `origem` e uma tabela de avaliações.
 
-**Por que vale:** fecha o ciclo entre a IA e a operação. A plataforma não só distribui, ela aprende onde a IA é confiável.
-
-**Como medir:** taxa de erro por categoria; quantas regras foram ajustadas a partir das revisões.
-
----
+**Como medir:** taxa de erro por categoria; regras ajustadas a partir das revisões.
 
 ## D3. Simulador de regras de fila
 
-**O que é:** antes de ativar uma configuração nova de filas, o supervisor testa o impacto com atendimentos passados, sem afetar a operação.
+**O que é:** antes de ativar regras novas, o supervisor testa o impacto com atendimentos passados.
 
-**Como funciona:**
-1. O supervisor edita as regras e clica em "simular".
-2. A plataforma passa os atendimentos históricos (sintéticos) pelo roteador com as regras novas, em modo de teste.
-3. Sai um relatório: quantos atendimentos mudariam de fila, como ficaria a distribuição, quais filas ficariam vazias ou lotadas.
-4. Se estiver bom, ele ativa.
+**Como funciona:** as entradas dos registros de decisão de roteamento (arquitetura 12.1) passam pelo roteador com as regras novas; sai quantos mudariam de fila e quais filas ficariam vazias ou lotadas.
 
-**O que muda na arquitetura:** exige uma decisão no núcleo: o roteador precisa ser uma **função pura** (atendimento + regras → fila), sem efeitos colaterais. Se for desenhado assim, o simulador sai quase de graça.
+**Muda na arquitetura:** nada, se o roteador for função pura. Serve também ao experimento sugerido no TAPI ("avaliação da distribuição de filas").
 
-**Por que vale:** dá segurança para a operação mexer nas regras sozinha, que é a essência do "configurável pela operação". E serve direto ao **experimento técnico**: "avaliação da distribuição de filas" é um dos experimentos sugeridos no TAPI.
-
-**Como medir:** o próprio relatório do simulador; comparar a distribuição prevista com a real depois de ativar.
-
----
+**Como medir:** distribuição prevista contra a real depois de ativar.
 
 ## D4. Painel ao vivo do supervisor
 
-**O que é:** uma tela com a saúde da operação em tempo real.
+**O que é:** a saúde da operação em tempo real: tamanho e espera por fila, SLA em risco, escalonamento, analistas disponíveis, estado do disjuntor.
 
-**Como funciona:**
-1. Toda ação já gera um evento (entrou na fila, foi atendido, escalou, resolveu).
-2. Um componente agrega esses eventos em indicadores por fila: tamanho, tempo médio de espera, SLA em risco, taxa de escalonamento IA → humano, analistas disponíveis.
-3. A tela atualiza sozinha (WebSocket).
-4. Alertas quando um limite é ultrapassado (ex.: fila com mais de 50 atendimentos ou espera acima de 5 minutos).
+**Como funciona:** um consumidor que só lê e agrega os eventos de auditoria; a tela atualiza sozinha (na entrega, leitura a cada 2 s; SSE é evolução); alertas por limite (valores de exemplo).
 
-**O que muda na arquitetura:** um consumidor de eventos que só lê e agrega. Não interfere no fluxo principal.
+**Por que vale:** dá dono ao supervisor e mostra o teste de carga ao vivo na demonstração.
 
-**Por que vale:** dá dono à quarta persona (supervisor). E é a melhor forma de **mostrar o teste de carga** na demonstração: as filas enchendo e esvaziando ao vivo.
-
-**Como medir:** no experimento de pico, quanto tempo o painel leva para mostrar que uma fila estourou.
-
----
+**Como medir:** no pico, tempo até o painel mostrar que uma fila estourou.
 
 ## D5. Copiloto do analista
 
-**O que é:** quando a conversa está com um humano, a IA sugere a resposta e o analista decide o que fazer com ela.
+**O que é:** com a conversa num humano, a IA sugere a resposta e o analista aceita, edita ou descarta.
 
-**Como funciona:**
-1. Chega uma mensagem numa conversa que está com um analista.
-2. A plataforma pede uma sugestão ao agente (novo evento `sugestao.solicitada`).
-3. O agente devolve `sugestao.gerada`, que aparece no painel como rascunho.
-4. O analista aceita, edita ou descarta. A plataforma registra a escolha.
+**Como funciona:** eventos novos `sugestao.solicitada` e `sugestao.gerada`, opcionais dentro da versão 1.x do contrato; rascunho no painel; a escolha é registrada.
 
-**O que muda na arquitetura:** dois tipos de evento novos no contrato (vira versão 1.1) e um campo de rascunho no painel do analista.
+**Por que vale:** na versão publicada de Brynjolfsson et al. (QJE 2025), +15% de conversas resolvidas por hora; os menos experientes ganharam velocidade e qualidade, e os mais experientes tiveram pequena queda de qualidade. Os +14% e +34% são do working paper (NBER, 2023).
 
-**Por que vale:** Brynjolfsson et al. (QJE 2025) mostram +14% de produtividade com IA como copiloto, e +34% para novatos. O TAPI aceita esse desenho se for justificado.
+**Como medir:** sugestões aceitas sem edição, editadas e descartadas, por experiência do analista.
 
-**Como medir:** taxa de sugestões aceitas sem edição, editadas e descartadas.
+## D6. Memória semântica (Evolução)
+
+**O que é:** um transformer pré-treinado gera o embedding de cada mensagem do cliente e do resumo de cada conversa encerrada; a busca por cosseno recupera contexto relevante. Não resume e não treina rede neural ("usamos um transformer pré-treinado para gerar embeddings e fazer busca semântica").
+
+**Partes**
+1. **Trechos relevantes na atribuição:** top-k do histórico do próprio cliente, na mesma marca, acima de uma similaridade mínima, somados ao perfil e às últimas N (que já estão na entrega). Base: Park et al. (2023), relevância = cosseno entre embeddings; Lewis et al. (2020), recuperação num índice vetorial denso; Reimers e Gurevych (2019), embeddings de frase comparáveis por cosseno.
+2. **Casos parecidos no painel:** até 3 conversas encerradas de outros clientes da marca, só com categoria, resumo mascarado, ações e desfecho. Por analogia com o COTA (Molino et al., 2018), que classifica e seleciona respostas.
+3. **Detector de incidente:** agrupa mensagens recentes por similaridade e conta clientes distintos por categoria; cruza com fila de erros, timeouts e falhas de integração, porque o mesmo incidente chega com palavras diferentes (Liu et al., ICSE 2023, iPACK). Agrupamento: Petrović et al. (2010).
+
+**Muda na arquitetura:** pgvector no mesmo Postgres (imagem com versão fixa, ex.: `pgvector/pgvector:0.8.7-pg16`); pendência de vetor gravada por `transicionar` na mesma transação, fora da outbox; worker em lote; serviço de embeddings fora do núcleo; vetor da consulta calculado fora da transação, com prazo curto. Plano B: serviço fora → a conversa segue com perfil e últimas N.
+
+**Modelo (escolha por teste)**
+
+| Opção | A favor | Contra |
+|---|---|---|
+| Qwen3-Embedding-0.6B | 78,9 em recuperação no MTEB-PT; Apache 2.0; dimensão de 32 a 1024 | Mais pesado em CPU; instrução na consulta |
+| multilingual-e5-small | 384 dimensões; MIT; 70,2 em recuperação | Prefixos obrigatórios; 512 tokens |
+| mmBERT base | Encoder recente, 1.800+ línguas | Sem ajuste, 17,6 em recuperação; ajustar é treinar |
+
+Números do MTEB-PT (Okamura et al., preprint aceito no BRACIS 2026, tabela 3). Versão reduzida: só e5-small contra recência, sem casos parecidos e sem detector; critério inclui a vazão do worker contra a taxa de entrada.
+
+**Riscos:** embedding é dado pessoal e o texto pode ser em boa parte reconstruído (Morris et al., 2023): mesma retenção e eliminação da mensagem. Filtro por marca depois do índice HNSW devolve menos linhas: busca exata quando o filtro é seletivo, índice parcial por marca ou `hnsw.iterative_scan` (pgvector 0.8.0+). Custo: 4 × dimensões + 8 bytes por vetor. Deriva: `modelo` em cada vetor.
+
+**Como medir:** ~100 consultas rotuladas à mão; precisão@5 e acerto@5 contra recência (Manning et al., 2008); latência adicionada; incidente injetado, inclusive parafraseado. Dados sintéticos superestimam a precisão.
 
 ---
 
 ## Decisões do núcleo que deixam os diferenciais baratos
 
-Três escolhas na arquitetura principal tornam quase todos os diferenciais simples de adicionar depois:
-
-1. **Todo evento é registrado num log** (já exigido pela auditoria). Alimenta D2, D3 e D4.
+1. **Todo evento é registrado num log.** Alimenta D2, D3 e D4.
 2. **O roteador é uma função pura.** Habilita D3.
-3. **O contrato com o agente é versionado.** Permite D5 sem quebrar o que já existe.
-
-## Ordem sugerida (provisória)
-
-D1 → D2 → D3 → D4 → D5
-
-Começa pelos mais baratos e pelo que alimenta o experimento técnico. A ordem final será decidida na fase 2.
+3. **O contrato aceita campos e tipos novos opcionais dentro da 1.x.** Permite D1, D5 e D6 sem quebrar.
+4. **Toda mensagem passa por `transicionar`.** A pendência de vetor do D6 entraria na mesma transação.
