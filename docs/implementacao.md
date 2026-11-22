@@ -39,7 +39,8 @@ helpdesk-ai-first/
 | `postgres` | 5433 no host, 5432 na rede | Databases `helpdesk` (núcleo), `agente_mock`, `canais` e `reconciliador` |
 | `redpanda` | 19092 no host, 9092 na rede | Kafka (modo de desenvolvimento, um nó) |
 | `topicos`, `migracoes` | — | Criam os tópicos e aplicam as migrations, e terminam |
-| `nucleo` | 8000 | API e workers (relay, agendador, distribuidor) |
+| `nucleo` | 8000 | API (uvicorn com 4 processos, sem laços) |
+| `trabalhador` | — | Laços de fundo: relay (8 tarefas), agendador, distribuidor. Separado da API depois do primeiro lote (diário, dia 2) |
 | `broker` | 8100 | `POST /webhook` e consumidor de `agente.para-helpdesk`; sem banco |
 | `agente_mock` | 8200 | Consumidor de `helpdesk.para-agente`; `GET /saude` e `POST /modo` |
 | `canais` | 8310 no host, 8300 na rede | Simulador dos canais de saída: recebe o que a plataforma envia ao cliente, inclusive a transferência; grava no database `canais`, onde o juiz lê as entregas; `POST /modo` com `fora` |
