@@ -42,7 +42,7 @@ helpdesk-ai-first/
 | `nucleo` | 8000 | API e workers (relay, agendador, distribuidor) |
 | `broker` | 8100 | `POST /webhook` e consumidor de `agente.para-helpdesk`; sem banco |
 | `agente_mock` | 8200 | Consumidor de `helpdesk.para-agente`; `GET /saude` e `POST /modo` |
-| `canais` | 8300 | Simulador dos canais de saída: recebe o que a plataforma envia ao cliente, inclusive a transferência; grava no database `canais`, onde o juiz lê as entregas; `POST /modo` com `fora` |
+| `canais` | 8310 no host, 8300 na rede | Simulador dos canais de saída: recebe o que a plataforma envia ao cliente, inclusive a transferência; grava no database `canais`, onde o juiz lê as entregas; `POST /modo` com `fora` |
 | `interface` | 3000 | Next.js: chat, acompanhamento, painel do analista, configuração |
 | `reconciliador` | — | Job periódico e sob demanda no fim de cada execução do experimento. Na entrega, só o script SQL com I1 a I4 no fim de cada execução (9) |
 
@@ -792,6 +792,8 @@ Na entrega (arquitetura 19.3): 13.1 sem as chaves de fencing e timeout; de 13.2,
 Mede a robustez da plataforma, não a qualidade das respostas do agente. Na entrega rodam E1, E3b e E6 (arquitetura 19.2); os outros cenários ficam com desenho e previsão no fim desta seção.
 
 **Ablação (decisão 12).** Uma versão só, a robusta. Na entrega, as chaves `OUTBOX_ATIVA` e `INBOX_ATIVA`; `FENCING_ATIVO` e `TIMEOUT_ATIVO` ficam para o E4 e o E5. Cada cenário roda com a proteção que ele testa ligada e desligada; o resto fica igual (mesmo broker, mesmo mock, mesmas tabelas). A tag `ingenua` é só o marco da fatia 1.
+
+**Na entrega, o k6 foi substituído por `carga/gerador.py`** (asyncio + httpx): reproduz a mesma agenda de `carga/agenda.py`, cada envio no seu instante, sem esperar os anteriores, com um reenvio em erro. Evita uma ferramenta a mais e roda no mesmo `.venv`. Onde esta seção diz k6, leia o gerador. Orquestração: `carga/rodar.py` (um cenário e posição), `carga/lote.py` (as 6 execuções), `carga/juiz.py`, `carga/falhas.py`, `carga/tabelas.py`.
 
 **Juiz nas pontas** (arquitetura 17):
 - O k6 grava `(id_externo, conversa, enviado_em, status HTTP)`; o simulador de canal (database `canais`) grava cada resposta entregue e cada mensagem de transferência, com `id_conversa` e `causado_por`.

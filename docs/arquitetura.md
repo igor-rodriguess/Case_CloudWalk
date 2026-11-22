@@ -625,9 +625,9 @@ Entrega em 23/11/2026 (decisão do usuário em 2026-11-21). O desenho das seçõ
 | Reabertura e fusão de identidades | Conversa resolvida não reabre: mensagem nova abre outra, e o perfil leva o último assunto. O mesmo cliente em dois canais vira dois clientes |
 | Envelhecimento (decisão 10; correção anotada: contar de `conversas.na_fila_desde`, aprovado pelo usuário em 21/11) | Fila de prioridade menor que divide equipe com outra pode esperar sem limite sob carga contínua |
 | Capacidade da IA (decisão 39; correção anotada: contar só `timeout_agente` de eventos enviados) | IA sem limite: nenhuma conversa espera por falta de capacidade da IA, e o custo do agente não é limitado |
-| Devolução para a IA, se não couber (piso do dia 1) | A conversa escalada termina com o humano |
-| Reconciliador como serviço com banco próprio (11.6) | Fica um script SQL com I1 a I4, rodado no fim de cada execução; sem detecção contínua; I5 a I7 não conferidos |
-| Prometheus e Grafana | Ficam logs JSON e contadores em `GET /metricas` |
+| ~~Devolução para a IA, se não couber~~ | Coube: implementada no dia 1 (`POST /painel/conversas/{id}/devolver`) e coberta pela fumaça |
+| Reconciliador como serviço com banco próprio (11.6) | Fica a consulta sob demanda de I1 a I6 (`GET /supervisor/reconciliacao`, `python -m nucleo.reconciliacao`); sem detecção contínua; I7 não conferido |
+| Prometheus e Grafana | Ficam logs JSON e indicadores em `GET /supervisor/metricas` |
 | Várias instâncias | Uma instância de cada serviço; correção sob concorrência só pelos testes de 13.1 |
 
 **Sai do experimento e vira limitação declarada:**
