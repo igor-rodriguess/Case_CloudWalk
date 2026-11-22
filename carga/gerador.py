@@ -24,7 +24,16 @@ class Registro:
     latencia_req_s: float = 0.0
 
 
-async def _enviar(cliente: httpx.AsyncClient, url: str, envio: Envio, reg: Registro) -> None:
+EM_VOO = 150  # abaixo do pool (200): a fila fica no semáforo, não dentro do httpcore
+
+
+async def _enviar(cliente: httpx.AsyncClient, url: str, envio: Envio, reg: Registro,
+                  limite: asyncio.Semaphore) -> None:
+    async with limite:
+        await _enviar_uma(cliente, url, envio, reg)
+
+
+async def _enviar_uma(cliente: httpx.AsyncClient, url: str, envio: Envio, reg: Registro) -> None:
     corpo = {"canal": envio.canal, "marca": envio.marca, "identificador": envio.conversa,
              "conteudo": envio.texto, "id_externo": envio.id_externo}
     for tentativa in range(2):
@@ -48,12 +57,15 @@ async def reproduzir(agenda: list[Envio], nucleo: str, inicio: float | None = No
     limites = httpx.Limits(max_connections=200, max_keepalive_connections=100)
     registros = [Registro(e) for e in agenda]
     inicio = inicio or time.time()
+    limite = asyncio.Semaphore(EM_VOO)
     async with httpx.AsyncClient(timeout=10, limits=limites) as cliente:
         tarefas = []
         for reg in registros:
             espera = inicio + reg.envio.t - time.time()
             if espera > 0:
                 await asyncio.sleep(espera)
-            tarefas.append(asyncio.create_task(asyncio.wait_for(_enviar(cliente, url, reg.envio, reg), 30)))
+            # Sem wait_for: cancelar requisições no meio corrompia o estado do pool do httpcore.
+            # O prazo de cada requisição já é o timeout do cliente (10 s, duas tentativas).
+            tarefas.append(asyncio.create_task(_enviar(cliente, url, reg.envio, reg, limite)))
         await asyncio.gather(*tarefas, return_exceptions=True)
     return registros
