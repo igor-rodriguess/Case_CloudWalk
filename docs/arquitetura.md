@@ -606,7 +606,7 @@ Entrega em 23/11/2026 (decisão do usuário em 2026-11-21). O desenho das seçõ
 | Req. | Entra | Simplificação declarada |
 |---|---|---|
 | 1 Canais | `POST /mensagens` com `canal` (chat, whatsapp, email) e `id_externo`; simulador = script e front | Sem regras próprias de canal (janela de 24 h, encadeamento de e-mail) |
-| 2 Filas configuráveis | `versoes_regras` (JSONB, versão imutável, ativar, rollback, validação de campo, operador e valor), roteador puro, editor JSON no front | Sem re-roteamento de fila removida e sem envelhecimento |
+| 2 Filas configuráveis | `versoes_regras` (JSONB, versão imutável, ativar, rollback, validação de campo, operador e valor), roteador puro, editor JSON no front | Re-roteamento de fila removida e envelhecimento (contado de `na_fila_desde`, decisão 10 como Proposta) entraram no código; não têm teste próprio |
 | 3 Triagem e distribuição | Triagem por palavras-chave (categoria, prioridade, sentimento, pedido de humano); distribuidor em laço de 1 s, uma conversa por transação, grupos ordenados IA → equipe, capacidade humana por conversa aberta | IA sem limite de capacidade; sem disjuntor; sem gatilho de escala por sentimento na plataforma: escala por pedido do cliente e quando o agente escala (o mock escala por palavra de irritação) |
 | 4 Integração | Outbox e relay (um item por transação, retentativa com backoff, `erro` com escala por `falha_integracao`), inbox nas pontas, id determinístico, broker desde a fatia 1 (ack do Kafka antes do 200; offset depois do 2xx do núcleo; 4xx e 500 repetido para `helpdesk.erros`; 503 ou rede com pausa), mock com latência e modos `normal`, `duplicar`, `fora` | Envelope `^1\.\d+$`; `agente.processando` é auditado e confirmado, sem renovar |
 | 5 Interface | Front do usuário: chat simulado, acompanhamento, painel do analista com fila de escalas, contexto e histórico, editor de filas | Leitura a cada 2 s |
@@ -623,8 +623,8 @@ Entrega em 23/11/2026 (decisão do usuário em 2026-11-21). O desenho das seçõ
 | Heartbeat e renovação (11.7) | Agente que passa de `TIMEOUT_AGENTE_S` escala, mesmo trabalhando; a resposta atrasada é descartada pelo fencing |
 | Inatividade e SLA (11.8) | Conversa cujo cliente some fica aberta até o agente ou o analista encerrar, ocupando vaga humana; sem alerta de SLA por fila |
 | Reabertura e fusão de identidades | Conversa resolvida não reabre: mensagem nova abre outra, e o perfil leva o último assunto. O mesmo cliente em dois canais vira dois clientes |
-| Envelhecimento (decisão 10; correção anotada: contar de `conversas.na_fila_desde`, aprovado pelo usuário em 21/11) | Fila de prioridade menor que divide equipe com outra pode esperar sem limite sob carga contínua |
-| Capacidade da IA (decisão 39; correção anotada: contar só `timeout_agente` de eventos enviados) | IA sem limite: nenhuma conversa espera por falta de capacidade da IA, e o custo do agente não é limitado |
+| ~~Envelhecimento~~ (decisão 10, Proposta) | Entrou no código: o distribuidor soma um degrau de prioridade a cada `ENVELHECIMENTO_S` desde `na_fila_desde`. Sem teste próprio |
+| Capacidade da IA como limite de custo (decisão 39; correção anotada: contar só `timeout_agente` de eventos enviados) | Na entrega a IA tem `CAPACIDADE_IA = 1.000.000` contada por conversa aberta: na prática sem limite, e o custo do agente não é limitado |
 | ~~Devolução para a IA, se não couber~~ | Coube: implementada no dia 1 (`POST /painel/conversas/{id}/devolver`) e coberta pela fumaça |
 | Reconciliador como serviço com banco próprio (11.6) | Fica a consulta sob demanda de I1 a I6 (`GET /supervisor/reconciliacao`, `python -m nucleo.reconciliacao`); sem detecção contínua; I7 não conferido |
 | Prometheus e Grafana | Ficam logs JSON e indicadores em `GET /supervisor/metricas` |

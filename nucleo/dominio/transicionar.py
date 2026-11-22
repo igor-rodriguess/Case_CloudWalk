@@ -7,7 +7,8 @@ Numa transação aberta por quem chama:
 4. confere a capacidade do novo dono ANTES de encerrar a atribuição atual;
 5. grava estado, mensagem, auditoria e saídas (outbox) juntos.
 Nunca levanta exceção por regra de negócio: devolve um Resultado. Nenhuma chamada HTTP aqui.
-Ordem de travas: conversa -> agendamento -> atendente.
+Ordem de travas: conversa -> atendente novo -> agendamentos e atendente antigo (ao encerrar).
+A trava da conversa serializa tudo o que mexe nela, então não há ciclo entre duas transações.
 """
 
 import json

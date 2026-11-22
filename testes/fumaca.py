@@ -95,7 +95,8 @@ def main() -> None:
     d4 = esperar(r3["id_conversa"], lambda d: autores(d)[-1] == "ia")
     checar("4 IA respondeu depois da devolução", autores(d4)[-1] == "ia", str(autores(d4)))
 
-    # 5. Fencing: analista que não é o dono não consegue responder.
+    # 5. Checagem de dono no painel: analista que não é o dono não consegue responder.
+    #    (O fencing por id_atribuicao é o cenário 6 e o teste de integração.)
     outro = atendente("Ana Souza")["id"]
     r5 = http.post(f"{NUCLEO}/painel/conversas/{r3['id_conversa']}/responder",
                    json={"id_atendente": outro, "conteudo": "intrusa"})
