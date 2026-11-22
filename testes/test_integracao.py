@@ -15,6 +15,9 @@ from pathlib import Path
 import psycopg
 import pytest
 
+if sys.platform == "win32":  # psycopg assíncrono não roda no ProactorEventLoop do Windows
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 RAIZ = Path(__file__).resolve().parent.parent
 BASE = os.getenv("TESTE_PG", "postgresql://helpdesk:helpdesk@localhost:5433")
 NOME = f"helpdesk_teste_{uuid.uuid4().hex[:8]}"

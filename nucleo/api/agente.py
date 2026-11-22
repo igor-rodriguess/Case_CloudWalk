@@ -93,7 +93,7 @@ async def receber(request: Request):
         if so_tipo:  # tipo de uma versão 1.x mais nova: audita e confirma
             async with unidade() as s:
                 await auditar(s, "evento_desconhecido", Ator("ia"), corpo.get("id_conversa"),
-                              tipo=corpo.get("tipo"))
+                              tipo_recebido=corpo.get("tipo"), versao=corpo.get("versao"))
             return {"resultado": "tipo_desconhecido"}
         return JSONResponse(status_code=422, content={"erro": "esquema", "detalhes": e.errors(include_url=False)})
 
