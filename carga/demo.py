@@ -76,8 +76,13 @@ def main() -> None:
     print("  outbox:", http.get(f"{NUCLEO}/supervisor/metricas").json()["outbox"])
     time.sleep(27)
     subprocess.run(["docker", "compose", "start", "broker"], cwd=RAIZ, capture_output=True)
-    print("  broker de volta; aguardando a retentativa...")
-    mostrar(r["id_conversa"], 25)
+    print("  broker de volta; aguardando a retentativa (pode levar até ~1 min pelo backoff)...")
+    for _ in range(90):
+        d = http.get(f"{NUCLEO}/conversas/{r['id_conversa']}").json()
+        if any(m["autor_tipo"] == "ia" for m in d["mensagens"]):
+            break
+        time.sleep(1)
+    mostrar(r["id_conversa"], 0)
 
     titulo("5. Agente lento: o prazo vence, escala por timeout e a resposta atrasada é descartada")
     http.post(f"{MOCK}/modo", json={"modo": "lento"})

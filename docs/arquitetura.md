@@ -48,7 +48,7 @@ O formato da "estrutura atual" do requisito 4 não é público; o contrato da se
 - 10 mil/dia: em 2023 a IA fez 75% dos atendimentos da InfinitePay, cerca de 2,6 milhões. Total ≈ 3,5 milhões/ano ≈ 9,5 mil/dia. *Dado público.*
 - 50 mil/dia: a base de clientes foi de ~1,2 milhão (2023) para 6,3 milhões. Extrapolação linear. *Premissa.*
 - 12 mensagens por atendimento (6 do cliente) e pico de 5x. *Premissas.*
-- **"100 msg/s" = total das duas direções** (~50 do cliente e ~50 do atendente; ~8,3 conversas novas/s). O pico do E2 seria uma rampa até 200 msg/s (fora da entrega, 19.1). O k6 reproduz essa chegada e o L da tabela abaixo com 6 mensagens a cada 84 s por conversa (impl 14).
+- **"100 msg/s" = total das duas direções** (~50 do cliente e ~50 do atendente; ~8,3 conversas novas/s). O pico do E2 seria uma rampa até 200 msg/s (fora da entrega, 19.1). A agenda de carga (`carga/agenda.py`, reproduzida por `carga/gerador.py` no lugar do k6) reproduz essa chegada e o L da tabela abaixo com 6 mensagens a cada 84 s por conversa (impl 14). A entrega foi medida à metade dessa taxa, 50 msg/s (19.2).
 
 **Conversas abertas (Lei de Little, L = chegada × tempo em sistema).** O release da CloudWalk diz que o Claudio Walker respondia "em até sete minutos", contra 22 do analista: 420 s é tempo até resolver, não tempo em sistema. Conversa escalada e conversa esperando o cliente ficam abertas mais tempo. A fonte não traz taxa de escala; os 25% abaixo são hipótese.
 
@@ -59,7 +59,7 @@ O formato da "estrutura atual" do requisito 4 não é público; o contrato da se
 | Pico de estresse, 25% passando por humano (hipótese) | 2,9 | ~750 s | ~2.200 |
 | Meta do teste, mesma hipótese | 8,3 | ~750 s | ~6.250 |
 
-Por isso a capacidade da IA conta trabalho em voo (mensagens aguardando resposta), não conversas abertas; os humanos seguem contando conversas (seção 12). Na entrega a IA fica sem limite (19.1).
+Por isso, no desenho, a capacidade da IA conta trabalho em voo (mensagens aguardando resposta), não conversas abertas; os humanos seguem contando conversas (seção 12). Na entrega o código conta conversas abertas para os dois tipos e dá à IA `CAPACIDADE_IA = 1.000.000`, na prática sem limite; a linha da IA continua travada a cada atribuição (seção 12, 19.1).
 
 **Conclusão:** o volume é baixo para Postgres e Kafka. **O desafio não é throughput, é confiabilidade** (não perder nem duplicar, aguentar falha e reentrega) **e estado** (milhares de conversas com fila, contexto e histórico corretos). A escala horizontal (E9) ficou fora da entrega; H3 está declarada como não medida (seção 17).
 
@@ -115,7 +115,7 @@ flowchart TD
     O --> Z[Resolvida ou encerrada por inatividade]
 ```
 
-Toda seta gera um evento de auditoria. Roteamento e distribuição gravam também as entradas da decisão (12.1). Na entrega, a retenção pelo disjuntor, a reabertura e a inatividade são Evolução, e a devolução só entra se sobrar tempo (19.1).
+Toda seta gera um evento de auditoria. Roteamento e distribuição gravam também as entradas da decisão (12.1). Na entrega, a retenção pelo disjuntor, a reabertura e a inatividade são Evolução; a devolução entrou (19.1).
 
 ### 7.1 Sequência de uma mensagem (caminho feliz)
 
@@ -165,7 +165,7 @@ stateDiagram-v2
 - **Reabertura:** dentro da janela (ex.: 24 h) a conversa volta a `na_fila`, passa de novo pelo roteador e perde o motivo e a hora do encerramento. Depois da janela, abre outra conversa, e o agente recebe o perfil operacional do cliente (seção 13).
 - **Timeout:** sem resposta nem renovação do agente (11.7), vai para `escalada` com `timeout_agente`. Vale também depois de uma devolução.
 - **Inatividade:** quando a plataforma espera o cliente e ele some, aviso e depois encerramento com motivo `inatividade` (11.8).
-- **Na entrega (19.1):** sem `na_fila → escalada` (disjuntor), sem reabertura e sem inatividade; a devolução só se sobrar tempo.
+- **Na entrega (19.1):** sem `na_fila → escalada` (disjuntor), sem reabertura e sem inatividade; a devolução entrou.
 
 ## 9. Componentes
 
@@ -211,7 +211,7 @@ flowchart LR
     UI -- lê a cada 2 s e age --> PA
 ```
 
-`transicionar` é o único caminho que escreve na conversa (11.2).
+Toda escrita na conversa acontece sob a trava dela, na transação de `transicionar` (11.2).
 
 | Componente | Responsabilidade |
 |---|---|
@@ -227,7 +227,7 @@ flowchart LR
 | **Agente mock** | Consome do Kafka e responde, com latência simulada e modos de falha |
 | **API do agente** | Recebe os eventos do agente. Idempotente; nunca devolve 500 por regra de negócio |
 | **Agendador** | Prazos: timeout do agente, SLA, inatividade e espera retida. Na entrega, só o timeout do agente |
-| **Reconciliador** | Lê o banco do núcleo, confere invariantes e grava as violações no próprio banco (11.6). Na entrega, script SQL com I1 a I4 no fim de cada execução |
+| **Reconciliador** | Lê o banco do núcleo, confere invariantes e grava as violações no próprio banco (11.6). Na entrega, consulta sob demanda de I1, I1b e I2 a I6 (`GET /supervisor/reconciliacao`, `python -m nucleo.reconciliacao`), sem banco próprio e sem rodar por execução do lote |
 | **Interface web** | Chat, acompanhamento, painel do analista, configuração de filas. Relê o estado pela API a cada 2 s |
 
 **Fora do núcleo:** broker e agente mock, porque espelham a fronteira real com a CloudWalk e o experimento os derruba; reconciliador, para medir com o mesmo código qualquer combinação de chaves (seção 17).
@@ -294,7 +294,7 @@ JSON com JSON Schema por tipo de evento e versionamento.
 
 É o centro da avaliação ("robustez diante de falhas, reentregas e picos"). Cada decisão responde a uma falha que o experimento provoca (seção 17), e as quatro principais têm chave de ablação (outbox, inbox, fencing, timeout).
 
-Garantia buscada: **entrega pelo menos uma vez, com deduplicação nas pontas que controlamos** (entrada, núcleo, mock, saída). Onde não controlamos o receptor (canais reais, agente real), é pelo menos uma vez. Mesmo princípio do exactly-once do Kafka: escrita idempotente e transacional (Wang et al., 2021).
+Garantia buscada: **entrega pelo menos uma vez, com deduplicação nas pontas que controlamos** (entrada, API do agente, mock). Onde não controlamos o receptor (canais, agente real), é pelo menos uma vez. Mesmo princípio do exactly-once do Kafka: escrita idempotente e transacional (Wang et al., 2021).
 
 Números de artigos nesta seção foram conferidos pelo resumo (rótulo em `referencias.md`), não no texto completo.
 
@@ -305,12 +305,14 @@ Números de artigos nesta seção foram conferidos pelo resumo (rótulo em `refe
 **Decisão**
 - Evento derivado tem id determinístico: `uuid5(causado_por, tipo, sequencia)`.
 - Entrada dos canais: deduplica pela inbox, com `(canal, id_externo)` como chave e a entrada como consumidor; reenvio com o mesmo id não cria mensagem. `id_externo` é sempre gravado em coluna indexada sem unicidade, para o juiz ligar a resposta à mensagem enviada mesmo com a inbox desligada.
-- Inbox `eventos_processados(consumidor, id_evento)` no núcleo, no mock e na saída por canal, na mesma transação do efeito. O broker não tem banco nem inbox: só repassa, e a deduplicação fica nas pontas.
+- Inbox `eventos_processados(consumidor, id_evento)` no núcleo (entrada e API do agente) e inbox própria no mock, na mesma transação do efeito. O broker não tem banco nem inbox: só repassa, e a deduplicação fica nas pontas.
+- Saída por canal sem inbox: o simulador faz o papel de um receptor que não controlamos e grava repetidas de propósito. Ela é pelo menos uma vez: um reenvio do relay depois de um `POST` que deu certo sem o resultado gravado (timeout, queda entre as transações) chega duas vezes e conta como duplicata no juiz, também com as chaves ligadas.
+- `INBOX_ATIVA` só chega ao núcleo; o mock deduplica nas duas posições.
 - Offset confirmado só depois do efeito; a saída por canal também passa pela outbox.
 
 **Base:** Saltzer, Reed e Clark (1984); Helland (2012); Richardson (outbox).
 
-### 11.2 Caminho único de escrita da conversa
+### 11.2 Escrita da conversa sob a trava
 
 **Falha que evita:** resposta atrasada da IA cai no atendimento humano; transições simultâneas; capacidade estourada; duas conversas abertas para o mesmo cliente.
 
@@ -318,10 +320,12 @@ Números de artigos nesta seção foram conferidos pelo resumo (rótulo em `refe
 1. `SELECT ... FOR UPDATE` na conversa;
 2. valida em `transicoes_permitidas`;
 3. fencing: atribuição diferente da atual é descartada e auditada;
-4. ao atribuir, confere a capacidade do novo atendente (humano sob a trava da linha dele) antes de encerrar a atribuição atual; sem capacidade, nada muda e a conversa fica com o dono atual;
+4. ao atribuir, confere a capacidade do novo atendente sob a trava da linha dele (humano ou IA) antes de encerrar a atribuição atual; sem capacidade, nada muda e a conversa fica com o dono atual;
 5. grava estado, mensagem (com a atribuição declarada no evento e a vigente, e um número de sequência), auditoria e outbox. O contexto que vai ao agente (últimas N) é lido aqui, sob a trava.
 
-- **Ordem de travas, sempre:** conversa → atendente novo (se humano) → agendamentos → atendente antigo (se humano) → disjuntor (Evolução na entrega). Nunca dois humanos na mesma transação: não há `com_humano → com_humano`.
+- **Fora de `transicionar`, sob a mesma trava:** `rotear_conversa` (fila e versão das regras), `escalar` (prioridade sugerida) e o re-roteamento de `filas.ativar` escrevem na conversa na mesma transação, depois de travá-la. A garantia é esta: toda escrita na conversa acontece sob a trava dela, na transação de `transicionar` ou logo depois dele.
+- **Leitura antes de escrever, sob a trava:** `POST /mensagens` procura a conversa aberta com `FOR UPDATE` (uma mensagem não cai numa conversa resolvida no meio do caminho) e o painel confere estado e dono com `FOR UPDATE` antes de responder ou devolver.
+- **Ordem de travas, sempre:** conversa → atendente novo → agendamentos → atendente antigo → disjuntor (Evolução na entrega). Nunca dois humanos na mesma transação: não há `com_humano → com_humano`.
 - **Rejeição não é exceção:** transição inválida, descarte e falta de capacidade voltam como resultado, e a auditoria é confirmada. `acao.executada` descartada é auditada com o conteúdo. Resumo de escala atrasado é anexado à escala vigente.
 - `eventos` recusa `UPDATE` e `DELETE` por trigger; `estado` tem `CHECK` com os seis valores.
 - Índice único parcial de conversa aberta por cliente e marca.
@@ -353,9 +357,10 @@ sequenceDiagram
 - Ordem por conversa **e destino**.
 - Um item por transação: reserva curta, envio fora da transação, resultado numa transação nova.
 - Retentativas limitadas, com backoff exponencial, teto e jitter.
-- Esgotou: `erro` em transação própria. É a fila de erros do núcleo, com endpoint de reprocessamento; o núcleo não publica no Kafka.
+- Esgotou: `erro`, e a escala (destino `broker`) na mesma transação; se o processo cair no meio, nenhum dos dois fica. É a fila de erros do núcleo, com endpoint de reprocessamento; o núcleo não publica no Kafka.
   - Destino `broker`: escala com fencing pela `id_atribuicao` do evento. Antes do envio não há prazo do agente (11.5), então este é o único caminho de escala de um evento que não saiu; já escalada por outro motivo = nada a fazer, auditado.
   - Destino `canal`: não escala; alerta e reprocessamento.
+- Limite da ordem: a reserva só espera antecessores `pendente` ou `enviando`. Um item em `erro` deixa passar os seguintes da mesma conversa e destino e, reprocessado, sai depois deles; no destino `canal`, o cliente pode receber a mensagem k+1 antes da k depois de um esgotamento (limitação).
 
 **Base:** Yuan et al. (2014), 92% das falhas catastróficas estudadas vieram de tratamento errado de erro não fatal; AWS Builders' Library.
 
@@ -369,7 +374,7 @@ sequenceDiagram
   - 503 ou conexão recusada: contrapressão sem limite. O broker pausa a partição, espera e retoma, sem deixar de consultar o Kafka (senão o grupo rebalanceia).
   - 4xx ou esquema inválido: `helpdesk.erros`.
   - 500 repetido: retentativas limitadas, depois `helpdesk.erros` com alerta; o reprocessamento escala pela `id_atribuicao`.
-- **Na entrega (19.1):** 2xx, 4xx e 503 (ou falha de rede, pausa sem limite) como acima. O 500 repetido vai a `helpdesk.erros` depois de `RETENTATIVAS_MAX` e o offset é confirmado, sem o reprocessamento que escala pela `id_atribuicao` (Evolução, 21); a conversa escala pelo `timeout_agente` pendente, então nada some sem aviso. Entre as tentativas a partição fica pausada (até ~2 min com os valores iniciais) e os timeouts das conversas dela contam contra o agente; aceito porque 500 é defeito do núcleo.
+- **Na entrega (19.1):** 2xx, 4xx e 503 (ou falha de rede, pausa sem limite) como acima. O 500 repetido vai a `helpdesk.erros` depois de `RETENTATIVAS_MAX` e o offset é confirmado, sem o reprocessamento que escala pela `id_atribuicao` (Evolução, 21); a conversa escala pelo `timeout_agente` pendente, então nada some sem aviso. Entre as tentativas a partição fica pausada (até ~2 min com os valores iniciais) e os timeouts das conversas dela contam contra o agente; aceito porque 500 é defeito do núcleo. O laço da volta roda sob um supervisor que o reinicia depois de qualquer exceção não tratada (por exemplo, commit recusado depois de um rebalance quando o Redpanda reinicia); enquanto reinicia, `GET /saude` do broker responde 503. O offset não confirmado volta a ser lido, então não há perda.
 
 **Base:** Wang et al. (2021); Saltzer, Reed e Clark (1984); documentação do aiokafka (`pause`/`resume` sem rebalance; `max_poll_interval_ms`).
 
@@ -399,7 +404,7 @@ sequenceDiagram
 
 Que uma decisão de roteamento refeita dê a mesma fila é teste unitário, não invariante.
 
-**Na entrega (19.1):** um script SQL com I1 a I4, rodado no fim de cada execução do experimento; o serviço periódico com banco próprio e I5 a I7 são Evolução.
+**Na entrega (19.1):** consulta sob demanda de I1, I1b (esperando humano), I2, I3, I4, I5 e I6, por `GET /supervisor/reconciliacao` ou `python -m nucleo.reconciliacao`, sobre o banco inteiro. Não roda automaticamente por execução do lote. Versão simplificada, que não explica sozinha os cenários do experimento: I3 confere só `(causado_por, sequencia)`, sem a metade "mesmo conteúdo com ids diferentes", então não vê a duplicata do E3b (as duas respostas têm `causado_por` diferentes); I1 só olha conversas `com_ia` e considera coberta a mensagem que tem qualquer resposta posterior. Quem mede perda e duplicata é o juiz (seção 17). O serviço periódico com banco próprio e I7 são Evolução.
 
 **Base:** Saltzer, Reed e Clark (1984); Basiri et al. (2016).
 
@@ -478,14 +483,14 @@ Que uma decisão de roteamento refeita dê a mesma fila é teste unitário, não
 - **Condições:** campos `marca`, `canal`, `categoria`, `prioridade`, `idioma`, `segmento_cliente`, `sentimento`, `origem`; operadores `igual`, `diferente`, `em`; combinação `todas` ou `qualquer`.
 - **Roteamento:** filas testadas em ordem; a primeira que casa leva; sem match, fila padrão (Zendesk). O id da fila é texto estável entre versões.
 - **Prioridade:** inteiro (1 baixa, 2 média, 3 alta), na fila e na conversa; maior primeiro.
-- **Ordem:** prioridade da fila, `origem = escalado` antes, prioridade da conversa com envelhecimento (sobe um degrau a cada `ENVELHECIMENTO_S` de espera) e espera. Na entrega, sem envelhecimento (decisão 10, Evolução; quando entrar, conta de `na_fila_desde`, seção 21): uma fila de prioridade menor que divide equipe com outra pode esperar sem limite sob carga contínua.
-- **`atendentes`:** lista ordenada de grupos (IA ou equipe); a ordem é a preferência. Nas filas AI first a IA vem primeiro, e a equipe recebe quando a IA está sem capacidade. Dentro do grupo, menor ocupação. Capacidade: humano por conversa aberta (ex.: 3); IA por mensagens aguardando resposta (seção 3). Na entrega a IA fica sem limite (decisão 39 é Evolução). Sem inatividade na entrega, conversa com humano esperando o cliente ocupa vaga até o analista encerrar; poucas conversas esquecidas lotam um analista de 3 vagas (limitação, seção 17).
+- **Ordem:** prioridade da fila, `origem = escalado` antes, prioridade da conversa com envelhecimento (sobe um degrau a cada `ENVELHECIMENTO_S` de espera) e espera. Na entrega o envelhecimento está no distribuidor (decisão 10): `ENVELHECIMENTO_S = 600` (hipótese, sem medida), contado de `na_fila_desde`, que `transicionar` grava ao entrar em `na_fila` ou `escalada`; o desempate também é por `na_fila_desde`. Sem teste próprio.
+- **`atendentes`:** lista ordenada de grupos (IA ou equipe); a ordem é a preferência. Nas filas AI first a IA vem primeiro, e a equipe recebe quando a IA está sem capacidade. Dentro do grupo, menor ocupação. Capacidade: humano por conversa aberta (ex.: 3); IA por mensagens aguardando resposta (seção 3). Na entrega a IA conta conversas abertas, como o humano, com `CAPACIDADE_IA = 1.000.000`: na prática sem limite (decisão 39 é Evolução). Mesmo sem limite, `transicionar` trava a linha da IA (`FOR UPDATE`) a cada atribuição e a atualiza a cada liberação (escala, resolução), o que serializa essas transações por marca. É possível fonte de contenção na saturação perto de 70 msg/s (hipótese, não medida; `pg_locks` durante a carga responderia). Sem inatividade na entrega, conversa com humano esperando o cliente ocupa vaga até o analista encerrar; poucas conversas esquecidas lotam um analista de 3 vagas (limitação, seção 17).
 - **`ao_abrir_disjuntor`:** `reter` (padrão) ou `transbordar`, declarado por fila (11.9). Evolução na entrega.
 - **Distribuidor:** laço a cada 1 s e depois de cada transição que libera capacidade. Considera só as filas com algum grupo elegível com capacidade (disjuntor e política incluídos), escolhe a primeira conversa delas pela ordem acima com `SKIP LOCKED` e chama `transicionar`: uma conversa por transação, para instâncias não se travarem nem desfazerem decisões em lote. `SEM_CAPACIDADE` tira a fila do ciclo. O analista também pode puxar da fila de escalas.
 - **Escala:** volta ao roteador com `origem = escalado`, que escolhe a fila de escalas da marca e da equipe. O analista vê só as filas dele.
 - **Handoff:** `conversa.escalada` traz motivo e resumo; o analista vê o histórico completo. O resumo aparece com links para as mensagens de origem (`fontes`); sem fontes, marcado como tal, porque resumo abstrativo alucina (Maynez et al., 2020). Escala por timeout ou falha usa resumo de reserva extrativo (triagem + últimas N mensagens). Ao escalar, o cliente recebe pelo canal uma mensagem de sistema de transferência, que é também como o juiz vê a escala (seção 17).
 - **Gatilhos de escala:** pedido do agente, pedido do cliente, sentimento negativo, timeout sem renovação, falha de integração. Na entrega, sem o gatilho por sentimento nem a renovação (19.1). O gatilho por sentimento é regra configurável, não conclusão de pesquisa: no estudo do Alibaba, a intervenção humana foi menos eficaz justamente nas escalas emocionais disparadas por algoritmo, ligadas a intervir tarde (Wang et al., 2026).
-- **Configuração segura:** cada edição gera uma versão imutável; ativar é atômico; rollback reativa a anterior. Antes de ativar, validação de campo, operador **e valor** contra o domínio (`marca` em `marcas`, `canal`, `prioridade`) e existência da fila padrão. Cada roteamento lê a versão ativa no banco, então todas as instâncias veem a troca. Ao ativar, conversas em `na_fila` de fila removida são re-roteadas (Evolução na entrega: até lá, remover fila com conversas esperando as deixa sem atendimento; limitação). `marca` em todas as consultas, com teste que tenta ler outra marca. Base: Tang et al. (2015).
+- **Configuração segura:** cada edição gera uma versão imutável; ativar é atômico; rollback reativa a anterior. Antes de ativar, validação de campo, operador **e valor** contra o domínio (`marca` em `marcas`, `canal`, `prioridade`) e existência da fila padrão. Cada roteamento lê a versão ativa no banco, então todas as instâncias veem a troca. Ao ativar, conversas em `na_fila` ou `escalada` de fila removida são re-roteadas na mesma transação (entregue, sem teste próprio). A busca usa `FOR UPDATE SKIP LOCKED`: conversa travada naquele instante (pelo distribuidor ou por uma mensagem chegando) não é re-roteada e fica sem atendimento até a próxima ativação, que a pega de novo (limitação). `marca` em todas as consultas, com teste que tenta ler outra marca. Base: Tang et al. (2015).
 
 ### 12.1 Registro de decisão
 
@@ -539,15 +544,15 @@ Não há tabela `filas`: a fila é objeto da versão de regras, com id em texto.
 | Banco | PostgreSQL | JSONB para as filas; transação para a outbox |
 | Broker | Redpanda | API Kafka, um binário, sobe fácil |
 | Interface | Next.js + React | Sugerido no TAPI |
-| Testes e carga | pytest; k6 | |
-| Observabilidade | Logs com `id_conversa`; Prometheus e Grafana | Na entrega, logs JSON e contadores em `GET /metricas` |
+| Testes e carga | pytest; gerador Python (`carga/gerador.py`, no lugar do k6) | Uma ferramenta a menos, mesmo `.venv` |
+| Observabilidade | Logs com `id_conversa`; Prometheus e Grafana | Na entrega, logs JSON e indicadores em `GET /supervisor/metricas` (impl 11) |
 | Empacotamento | Docker Compose | Reprodutível com um comando |
 
 **Python ou Ruby:** a CloudWalk usa Ruby e o Chatwoot é Rails; Python ganha em velocidade de entrega no prazo. Os componentes só conversam por HTTP, Kafka e JSON Schema, o que permite migrar um por vez.
 
 ## 16. Métricas
 
-Técnicas e de experimento: impl 11 e 14. Latência interna: da entrada da mensagem ao ack do broker (definição única).
+Técnicas e de experimento: impl 11 e 14. Latência interna: da entrada da mensagem ao ack do broker (definição única). O juiz a mede só para `mensagem.recebida` (mensagens 2 a 6 de cada conversa) e só com a outbox ligada, porque com ela desligada não há linha de outbox com `enviado_em` (impl 14). Não aparece no painel.
 
 Operacionais (painel): espera por fila; resolução pela IA (sem contar inatividade); escalonamento e tempo até o handoff; SLA por fila; reabertura; encerramentos por inatividade; estado do disjuntor e conversas retidas.
 
@@ -563,14 +568,14 @@ Operacionais (painel): espera por fila; resolução pela IA (sem contar inativid
 - esperando humano = enviada a conversa já escalada; nem perdida nem respondida;
 - recusada = sem 2xx na entrada depois do reenvio; nunca entrou no sistema e fica fora de "perdidas".
 
-O gerador reenvia uma vez, com o mesmo `id_externo`, em erro ou timeout. O script do reconciliador (I1 a I4, 11.6) explica a causa.
+O gerador reenvia uma vez, com o mesmo `id_externo`, em erro ou timeout. O reconciliador (11.6) é consulta sob demanda, não roda por execução e não explica sozinho a causa nos cenários medidos; a explicação vem do juiz e das colunas da tabela.
 
-**Cenários na entrega** (19.2): E1 base (100 msg/s), E3b reenvio do canal (`INBOX_ATIVA`), E6 broker fora (`OUTBOX_ATIVA`). Previsão escrita antes de rodar (impl 14).
+**Cenários na entrega** (19.2), executados a 50 msg/s (4,15 conversas/s, plano B): E1 base, E3b reenvio do canal (`INBOX_ATIVA`), E6 broker fora (`OUTBOX_ATIVA`). Previsão escrita antes de rodar e reescalonada para 50 msg/s antes de ver a tabela (impl 14).
 
 **Fora da entrega, com desenho e previsão em impl 14:** E2 rampa até 200 msg/s, E3 duplicatas do agente, E4 agente lento, E4b agente trabalhando, E5 agente fora, E7 núcleo morto, E8 disjuntor, E9 escalabilidade. O efeito de cada corte está em 19.1.
 
 **Hipóteses**
-- H1, medida no E3b e no E6: com a chave desligada aparece a falha que ela evita (duplicata no E3b, perda no E6); ligada, zero. Como o prazo do agente só nasce no envio (11.5), evento que a outbox desligada não enviou fica sem prazo e aparece como perda no juiz, não como escala; a tabela traz as escaladas para conferir. No E1, sem falha, as duas posições zeram, e a robusta mantém p95 interna abaixo de 500 ms a 100 msg/s.
+- H1, medida no E3b e no E6: com a chave desligada aparece a falha que ela evita (duplicata no E3b, perda no E6); ligada, zero. Como o prazo do agente só nasce no envio (11.5), evento que a outbox desligada não enviou fica sem prazo e aparece como perda no juiz, não como escala; a tabela traz as escaladas para conferir. No E1, sem falha, as duas posições zeram, e a robusta mantém p95 interna abaixo de 500 ms a 50 msg/s (medida só na posição ligada, 16).
 - H2 (E8, disjuntor por política da fila): desenho pronto, não medido. O disjuntor é Evolução (19.1).
 - H3 (E9, 3 instâncias): desenho pronto, não medido. A entrega roda uma instância de cada serviço.
 
@@ -578,15 +583,22 @@ O gerador reenvia uma vez, com o mesmo `id_externo`, em erro ou timeout. O scrip
 
 **Limitações** (o README copia a lista, com a de 19.1):
 - ambiente local, agente mock com texto fixo, dados sintéticos, premissas de volume;
-- entrega pelo menos uma vez onde não controlamos o receptor; id determinístico é requisito imposto ao agente;
+- entrega pelo menos uma vez onde não controlamos o receptor; id determinístico é requisito imposto ao agente; a saída por canal não tem inbox, e uma entrega repetida pelo relay conta como duplicata no juiz (11.1);
+- ordem por conversa e destino deixa de valer depois de um item em `erro` (11.3);
 - Redpanda de um nó em modo de desenvolvimento, que confirma sem fsync;
 - fila no caminho de volta conta contra o agente (11.5);
 - formato do contrato é proposta nossa (seção 10); marca fixa no contrato;
 - canais simulados: janela de 24 h do WhatsApp e encadeamento de e-mail ficam de fora;
 - a ablação desliga uma chave por vez e não mede interações entre proteções;
 - Postgres sem réplica: falha de disco ou de banco não é testada;
-- autenticação por usuário fixo e isolamento por marca só por filtro com teste, sem RLS;
-- o k6 roda na mesma máquina e disputa CPU com o sistema, então o E1 mede o conjunto;
+- sem autenticação (perfil escolhido na tela) e isolamento por marca só por filtro, sem RLS;
+- o gerador de carga (Python, no lugar do k6) roda na mesma máquina e disputa CPU com o sistema, então o E1 mede o conjunto;
+- carga medida a 50 msg/s, não a 100: a máquina saturou perto de 70 msg/s totais num teste com o código anterior às correções de desempenho (19.2); a meta de 100 msg/s fica sem evidência;
+- a linha da IA é travada a cada atribuição (seção 12): possível contenção por marca, hipótese não medida;
+- fila removida com conversa travada no instante da ativação: essa conversa só é re-roteada na ativação seguinte (seção 12); envelhecimento com `ENVELHECIMENTO_S` hipotético; nenhum dos dois com teste próprio;
+- p95 interna só na posição ligada e sem a 1ª mensagem de cada conversa (16);
+- reconciliador simplificado e sob demanda, que não explica sozinho os cenários medidos (11.6);
+- parte dos testes previstos não está automatizada (impl 13);
 - a qualidade do resumo de handoff não é medida (o mock escreve texto fixo);
 - vaga humana presa: sem inatividade na entrega, conversa com humano esperando o cliente ocupa vaga até o analista encerrar (seção 12);
 - o juiz depende do banco do núcleo para ligar resposta a `id_externo` (tabela `mensagens`, ordem por `seq`, impl 14): um defeito do núcleo que grave errado nessa tabela contamina a medida; a regra supõe uma resposta por mensagem antes da mensagem seguinte da conversa, o que vale na carga da entrega (84 s entre mensagens);
@@ -606,14 +618,14 @@ Entrega em 23/11/2026 (decisão do usuário em 2026-11-21). O desenho das seçõ
 | Req. | Entra | Simplificação declarada |
 |---|---|---|
 | 1 Canais | `POST /mensagens` com `canal` (chat, whatsapp, email) e `id_externo`; simulador = script e front | Sem regras próprias de canal (janela de 24 h, encadeamento de e-mail) |
-| 2 Filas configuráveis | `versoes_regras` (JSONB, versão imutável, ativar, rollback, validação de campo, operador e valor), roteador puro, editor JSON no front | Re-roteamento de fila removida e envelhecimento (contado de `na_fila_desde`, decisão 10 como Proposta) entraram no código; não têm teste próprio |
-| 3 Triagem e distribuição | Triagem por palavras-chave (categoria, prioridade, sentimento, pedido de humano); distribuidor em laço de 1 s, uma conversa por transação, grupos ordenados IA → equipe, capacidade humana por conversa aberta | IA sem limite de capacidade; sem disjuntor; sem gatilho de escala por sentimento na plataforma: escala por pedido do cliente e quando o agente escala (o mock escala por palavra de irritação) |
-| 4 Integração | Outbox e relay (um item por transação, retentativa com backoff, `erro` com escala por `falha_integracao`), inbox nas pontas, id determinístico, broker desde a fatia 1 (ack do Kafka antes do 200; offset depois do 2xx do núcleo; 4xx e 500 repetido para `helpdesk.erros`; 503 ou rede com pausa), mock com latência e modos `normal`, `duplicar`, `fora` | Envelope `^1\.\d+$`; `agente.processando` é auditado e confirmado, sem renovar |
-| 5 Interface | Front do usuário: chat simulado, acompanhamento, painel do analista com fila de escalas, contexto e histórico, editor de filas | Leitura a cada 2 s |
-| 6 Handoff | Escala volta ao roteador com `origem = escalado`; fila de escalas; resumo do mock com `fontes`, ou resumo de reserva extrativo; mensagem de transferência ao cliente; analista assume e responde | Devolução para a IA só se sobrar tempo |
+| 2 Filas configuráveis | `versoes_regras` (JSONB, versão imutável, ativar, rollback, validação de campo, operador e valor), roteador puro, editor JSON no front | Entregues também, sem teste próprio: envelhecimento (`ENVELHECIMENTO_S = 600`, hipótese, contado de `na_fila_desde`; decisão 10, status na seção 20) e re-roteamento de fila removida ao ativar (conversa travada no instante é pulada pelo `SKIP LOCKED` e só é re-roteada na ativação seguinte) |
+| 3 Triagem e distribuição | Triagem por palavras-chave (categoria, prioridade, sentimento, pedido de humano); distribuidor em laço de 1 s, uma conversa por transação, grupos ordenados IA → equipe, capacidade humana por conversa aberta | IA sem limite na prática (`CAPACIDADE_IA = 1.000.000`, contada em conversas abertas), mas com a linha travada a cada atribuição: possível contenção por marca na saturação (hipótese, seção 12); sem disjuntor; sem gatilho de escala por sentimento na plataforma: escala por pedido do cliente e quando o agente escala (o mock escala por palavra de irritação) |
+| 4 Integração | Outbox e relay (um item por transação, retentativa com backoff, `erro` com escala por `falha_integracao`), inbox nas pontas, id determinístico, broker desde a fatia 1 (ack do Kafka antes do 200; offset depois do 2xx do núcleo; 4xx e 500 repetido para `helpdesk.erros`; 503 ou rede com pausa), mock com latência e modos `normal`, `lento`, `duplicar`, `fora`; broker com supervisor do laço da volta | Envelope `^1\.\d+$`; `agente.processando` é auditado e confirmado, sem renovar |
+| 5 Interface | Front do usuário: chat simulado, acompanhamento, painel do analista com fila de escalas, contexto e histórico, editor de filas, consumindo a API (`docs/api-front.md`) | Leitura a cada 2 s; sem autenticação (perfil escolhido na tela); a demonstração tem reserva sem front (`carga/demo.py`) |
+| 6 Handoff | Escala volta ao roteador com `origem = escalado`; fila de escalas; resumo do mock com `fontes`, ou resumo de reserva extrativo; mensagem de transferência ao cliente; analista assume, responde e devolve para a IA com nota | Qualidade do resumo não medida |
 | 7 Auditoria | `eventos` só de inserção (trigger), `decisao_roteamento` e `decisao_distribuicao` | — |
 | 8 Memória | Últimas N mensagens lidas sob a trava; perfil com `contatos_30d`, `escalas_30d` e `ultimo_assunto`; identidades mínimas (canal + identificador → cliente) | Sem fusão de identidades entre canais nem reabertura |
-| 9 Volume e falhas | `transicionar` com trava, transições permitidas e fencing; `timeout_agente` desde o ack (agendador só com esse tipo); chaves `OUTBOX_ATIVA` e `INBOX_ATIVA`; juiz nas pontas; script do reconciliador; E1, E3b e E6 | Ver 19.2 |
+| 9 Volume e falhas | `transicionar` com trava, transições permitidas e fencing; `timeout_agente` desde o ack (agendador só com esse tipo); chaves `OUTBOX_ATIVA` e `INBOX_ATIVA`; juiz nas pontas; reconciliador sob demanda (I1, I1b, I2 a I6); E1, E3b e E6 a 50 msg/s | Ver 19.2 |
 
 **Sai e vira Evolução** (seção 21). O desenho fica nas seções citadas, com a correção da rodada 3 anotada; cada linha diz o efeito na entrega.
 
@@ -623,22 +635,24 @@ Entrega em 23/11/2026 (decisão do usuário em 2026-11-21). O desenho das seçõ
 | Heartbeat e renovação (11.7) | Agente que passa de `TIMEOUT_AGENTE_S` escala, mesmo trabalhando; a resposta atrasada é descartada pelo fencing |
 | Inatividade e SLA (11.8) | Conversa cujo cliente some fica aberta até o agente ou o analista encerrar, ocupando vaga humana; sem alerta de SLA por fila |
 | Reabertura e fusão de identidades | Conversa resolvida não reabre: mensagem nova abre outra, e o perfil leva o último assunto. O mesmo cliente em dois canais vira dois clientes |
-| ~~Envelhecimento~~ (decisão 10, Proposta) | Entrou no código: o distribuidor soma um degrau de prioridade a cada `ENVELHECIMENTO_S` desde `na_fila_desde`. Sem teste próprio |
-| Capacidade da IA como limite de custo (decisão 39; correção anotada: contar só `timeout_agente` de eventos enviados) | Na entrega a IA tem `CAPACIDADE_IA = 1.000.000` contada por conversa aberta: na prática sem limite, e o custo do agente não é limitado |
+| ~~Envelhecimento~~ (decisão 10) | Entrou no código: o distribuidor soma um degrau de prioridade a cada `ENVELHECIMENTO_S` (600, hipótese) desde `na_fila_desde`. Sem teste próprio |
+| ~~Re-roteamento de fila removida~~ | Entrou no código (`filas.ativar`, mesma transação, `SKIP LOCKED`). Sem teste próprio; conversa travada no instante fica para a ativação seguinte |
+| ~~Modo `lento` do mock~~ | Entrou: usado pela fumaça (cenário 6) e pelo `carga/demo.py` (momento 5). O modo `trabalhando` não |
+| Capacidade da IA como limite de custo (decisão 39; correção anotada: contar só `timeout_agente` de eventos enviados) | Na entrega a IA tem `CAPACIDADE_IA = 1.000.000` contada por conversa aberta: na prática sem limite, e o custo do agente não é limitado. A linha da IA ainda é travada a cada atribuição (seção 12) |
 | ~~Devolução para a IA, se não couber~~ | Coube: implementada no dia 1 (`POST /painel/conversas/{id}/devolver`) e coberta pela fumaça |
 | Reconciliador como serviço com banco próprio (11.6) | Fica a consulta sob demanda de I1 a I6 (`GET /supervisor/reconciliacao`, `python -m nucleo.reconciliacao`); sem detecção contínua; I7 não conferido |
 | Prometheus e Grafana | Ficam logs JSON e indicadores em `GET /supervisor/metricas` |
-| Várias instâncias | Uma instância de cada serviço; correção sob concorrência só pelos testes de 13.1 |
+| Várias instâncias | Uma instância de cada serviço; correção sob concorrência só pelos testes de integração (impl 13) |
 
 **Sai do experimento e vira limitação declarada:**
 
 | Cenário | Efeito do corte |
 |---|---|
-| E2 rampa até 200 msg/s | Nada medido acima de 100 msg/s |
-| E3 duplicatas do agente | Coberto só pelo `UNIQUE (id_evento)`, pelo id determinístico e pelo teste de 13.1 |
-| E4 e E4b agente lento e trabalhando | Fencing coberto só por teste; renovação fora da entrega |
-| E5 agente fora curto | A escala por timeout aparece só na demonstração |
-| E7 núcleo morto | Perda entre commit e envio não medida; a outbox a cobre por desenho e pelo teste do relay morto (13.1) |
+| E2 rampa até 200 msg/s | Nada medido acima de 50 msg/s |
+| E3 duplicatas do agente | Coberto só pelo `UNIQUE (id_evento)`, pelo id determinístico e pelo teste de deduplicação do agente (`test_integracao.py`) |
+| E4 e E4b agente lento e trabalhando | Fencing coberto só por teste (`test_integracao.py`, fumaça 6); renovação fora da entrega |
+| E5 agente fora curto | A escala por timeout aparece só na fumaça 6 e na demonstração (modo `lento`) |
+| E7 núcleo morto | Perda entre commit e envio não medida; a outbox a cobre por desenho. O teste do relay morto entre reserva e resultado não está automatizado (impl 13) |
 | E8 disjuntor | H2 não medida; disjuntor fora da entrega |
 | E9 escalabilidade | H3 não medida |
 | 2ª e 3ª repetições | Sem variância (17, limitações) |
@@ -648,6 +662,7 @@ Entrega em 23/11/2026 (decisão do usuário em 2026-11-21). O desenho das seçõ
 ### 19.2 Experimento mínimo
 
 - Carga pela agenda pré-gerada com semente (impl 14): 8,3 conversas/s, 6 mensagens a cada 84 s, 7 min de aquecimento e 5 min medidos. Se a máquina não sustentar, cai para 50 msg/s, declarado.
+- **Executado a 50 msg/s (4,15 conversas/s), plano B.** Num teste com o código anterior às correções de desempenho, a máquina saturou perto de 70 msg/s totais (~35 de cliente) e passou a recusar. O lote roda com o banco limpo e o código do commit atual; as previsões foram reescalonadas para 50 msg/s (impl 14).
 - Juiz da seção 17; previsões em impl 14; `RELAY_WORKERS` dimensionado pela Lei de Little (impl 11).
 - Orçamento: 3 cenários × 2 posições × 1 repetição = 6 execuções de ~12 min, ~1,2 h de máquina, em lote por script. Segunda e terceira repetições só se sobrar tempo, declarado. CSV bruto por execução e script das tabelas (impl 14).
 
@@ -658,7 +673,7 @@ Entrega em 23/11/2026 (decisão do usuário em 2026-11-21). O desenho das seçõ
 | Quando | Agente (backend) | Usuário (front) | Marco e piso |
 |---|---|---|---|
 | Dia 1 (21/11) manhã | OpenAPI congelado em `/docs`; migration 0002 única; `transicionar`, outbox e relay, inbox; broker; mock | Telas de chat e acompanhamento sobre o OpenAPI, com dados de exemplo | 12h: mensagem vai e volta pelo broker |
-| Dia 1 tarde | Agendador do timeout; roteador e versões; distribuidor; escala com resumo; auditoria; identidades mínimas e memória; testes de 13.1 nesse escopo | Painel do analista e editor JSON | Fim do dia: escala por timeout chega ao painel; ponto de controle 1. **Piso:** se não chegar, a devolução e a memória saem e o dia 2 começa pelo handoff |
+| Dia 1 tarde | Agendador do timeout; roteador e versões; distribuidor; escala com resumo; auditoria; identidades mínimas e memória; testes de integração nesse escopo (impl 13) | Painel do analista e editor JSON | Fim do dia: escala por timeout chega ao painel; ponto de controle 1. **Piso:** se não chegar, a devolução e a memória saem e o dia 2 começa pelo handoff |
 | Dia 2 (22/11) manhã | Chaves de ablação, juiz, agenda de carga, script do reconciliador; rodar E1, E3b e E6 | Integração real com a API | 13h: tabela com uma repetição; ponto de controle 2. **Piso:** sem tabela, roda só o E6 com as duas posições |
 | Dia 2 tarde | README com subida em um comando, limitações (17 e 19.1), tabelas | Roteiro de demonstração | — |
 | Dia 2 noite | Gravação de reserva de cada falha | Ensaio | 23/11 fica de folga |
@@ -667,17 +682,19 @@ Estimativa sem velocidade medida para este escopo; os pisos são o plano de cort
 
 ### 19.4 Roteiro de demonstração (decisão 42)
 
-Cinco minutos, com `docker compose up` já feito, k6 leve (2 conversas/s, hipótese) e gravação de reserva de cada falha.
+Cinco minutos, com `docker compose up` já feito, sem carga de fundo, na ordem dos 7 momentos de `carga/demo.py`. O front (do autor, sobre `docs/api-front.md`) fica aberto ao lado; `python -m carga.demo` executa os mesmos momentos e é a reserva automatizada (pausa a cada momento; `--sem-pausa` roda direto). O comportamento sob carga fica com as tabelas do lote. Agente lento é sempre pelo modo `lento` do mock, nunca por `stop agente_mock`.
 
-| Tempo | Na tela | Falha ao vivo | O que a plateia vê | Critério |
+| Tempo | Momento do `demo.py` | Falha ao vivo | O que a plateia vê | Critério |
 |---|---|---|---|---|
 | 0:00 a 0:20 | Slide com o diagrama da seção 9 | — | Canal, broker, Kafka, núcleo, agente fora do núcleo | Aderência e coerência |
-| 0:20 a 1:05 | Chat simulado e acompanhamento | — | Mensagem vai à IA e volta; estado `nova → na_fila → com_ia`; auditoria com `id_atribuicao` e `causado_por` | Aderência; demonstração |
-| 1:05 a 1:50 | Editor da fila (JSON) | — | Versão nova para JIM, ativada sem deploy; a conversa seguinte cai na fila nova e o registro de decisão mostra a regra; rollback | Filas configuráveis |
-| 1:50 a 2:50 | Acompanhamento e contador do juiz | `stop broker` por 30 s; depois o simulador reenvia o mesmo `id_externo` | Outbox cresce, o broker volta, tudo sai em ordem; zero perda; as poucas respostas que estavam em voo quando o broker caiu escalam por timeout e aparecem como escala, não como perda; reenvio vira uma mensagem só | Robustez da integração |
-| 2:50 a 3:50 | Painel do analista | k6 pausado; `stop agente_mock`; `start agente_mock` no fim do trecho e k6 retomado | Uma mensagem pelo chat simulado escala por timeout 30 s depois do envio; o cliente recebe a transferência; analista assume pela fila de escalas com resumo de reserva e histórico. Fala: sem disjuntor (Evolução), todas as conversas com a IA escalariam do mesmo jeito; é a falha metaestável da 11.9, por isso a carga fica parada aqui | Handoff com contexto |
-| 3:50 a 4:40 | Tabelas do E3b, do E6 e p95 do E1 | — | Chave desligada × ligada: duplicata e perda só com a chave desligada; reconciliador zerado | Evidência; reprodutibilidade |
-| 4:40 a 5:00 | Slide de limitações | — | Mock com texto fixo, uma máquina, canais simulados, o que virou Evolução | Honestidade |
+| 0:20 a 1:00 | 1. Três canais, duas marcas | — | Chat, WhatsApp e e-mail; triagem e roteador escolhem a fila; a IA responde; a mensagem de fraude cai na fila só de humanos; auditoria com `id_atribuicao` e `causado_por` | Aderência; demonstração |
+| 1:00 a 1:15 | 2. Reenvio do mesmo `id_externo` | — | O segundo envio volta com `duplicada = true`: uma mensagem só, pela inbox da entrada | Robustez da integração |
+| 1:15 a 1:50 | 3. Cliente pede humano | — | Escala com resumo e fontes, volta ao roteador com `origem = escalado`, vai à fila de escalas da marca; o distribuidor a entrega a um analista, que vê resumo e histórico no painel | Handoff com contexto |
+| 1:50 a 3:00 | 4. Broker fora por 30 s | `docker compose stop broker`; `start` 30 s depois | A outbox segura o evento (`/supervisor/metricas`), o broker volta e a resposta chega; zero perda. Esperar consultando a conversa até a entrega. Fala: "pode levar até ~1 min pelo backoff" (tentativas em 0,5 a 63 s acumulados, `BACKOFF_BASE_S = 0,5`). O `demo.py` espera 25 s fixos depois do `start`; se a resposta ainda não apareceu, reconsultar | Robustez da integração |
+| 3:00 a 3:50 | 5. Agente lento | mock em `lento`; volta a `normal` no fim | A conversa escala por timeout 30 s depois do ack do broker; o cliente recebe a transferência; a resposta atrasada é descartada pelo fencing (`evento_descartado` na auditoria). Fala: sem disjuntor (Evolução), com o agente fora todas as conversas com a IA escalariam do mesmo jeito; é a falha metaestável da 11.9 | Handoff; robustez |
+| 3:50 a 4:20 | 6. Filas sem deploy | — | Versão nova (fila JIM e-mail), validada e ativada sem deploy; o simulador de regras mostra a fila nova; rollback para a anterior | Filas configuráveis |
+| 4:20 a 4:45 | 7. Reconciliação, e tabelas do lote | — | Totais de I1, I1b e I2 a I6 no ambiente da demonstração. Depois, as tabelas do E3b e do E6 (duplicata e perda só com a chave desligada) e a p95 interna do E1 ligado; a explicação de cada número vem do juiz, não do reconciliador | Evidência; reprodutibilidade |
+| 4:45 a 5:00 | Slide de limitações | — | Mock com texto fixo, uma máquina, carga a 50 msg/s, canais simulados, o que virou Evolução | Honestidade |
 
 ## 20. Decisões
 
@@ -702,7 +719,7 @@ Cinco minutos, com `docker compose up` já feito, k6 leve (2 conversas/s, hipót
 | 17 | Broker responde ao webhook só depois do ack do Kafka | Decidida |
 | 17b | Broker confirma o offset só depois do núcleo; contrapressão por pausa da partição | Proposta |
 | 18 | Agendador único para prazos (na entrega, só `timeout_agente`) | Decidida |
-| 19 | Reconciliador de invariantes (na entrega, script com I1 a I4) | Decidida |
+| 19 | Reconciliador de invariantes (na entrega, consulta sob demanda com I1, I1b e I2 a I6) | Decidida |
 | 20 | Regras de fila versionadas, com validação de valor e rollback | Proposta |
 | 21 | Roteador como função pura | Proposta |
 | 22 | Prazo renovável por `agente.processando`, com teto; fora da entrega (19.1) | Proposta |
@@ -733,13 +750,14 @@ Fica fora da entrega de 23/11. Entra nas limitações do README. As linhas marca
 | Item | Por que ficou para depois |
 |---|---|
 | Disjuntor e `reter`/`transbordar` (11.9) | Plano de 2 dias. Rodada 3: passo de retenção no distribuidor, depois do laço de atribuição, para filas com disjuntor não fechado e `reter` (ou `transbordar` sem outro grupo): mensagem de espera e `espera_retida`, uma conversa por transação, índice único parcial por conversa; sair de `na_fila` cancela o `espera_retida`. `atribuicoes.sonda` gravado pelo distribuidor e copiado pelo relay; esgotamento do relay numa sonda reabre. Numa queda, as ~3.500 conversas já com a IA escalam por timeout; o disjuntor só protege as novas |
-| Prazo renovável (11.7) e modos `lento` e `trabalhando` do mock | Plano de 2 dias |
+| Prazo renovável (11.7) e modo `trabalhando` do mock (o `lento` entrou na entrega) | Plano de 2 dias |
 | Inatividade e SLA (11.8) | Plano de 2 dias. Rodada 3: contar vaga humana só quando o próximo passo é do analista; com inatividade de e-mail de 72 h e 3 vagas por analista, poucos e-mails sem resposta lotam a equipe |
 | Reabertura e fusão de identidades | Plano de 2 dias; identidades ficam na versão mínima |
-| Envelhecimento de prioridade (decisão 10) | Plano de 2 dias. Rodada 3: `conversas.na_fila_desde`, gravado por `transicionar` ao entrar em `na_fila` ou `escalada`, no `ORDER BY` e no índice, no lugar de `criada_em` |
-| Capacidade da IA (decisão 39) | Plano de 2 dias. Rodada 3: conta só `timeout_agente` pendentes das atribuições dela; evento parado na outbox não conta (11.5); conferida só pelo distribuidor |
+| ~~Envelhecimento de prioridade (decisão 10)~~ | Entrou na entrega, com a correção da rodada 3 (`na_fila_desde` no `ORDER BY`, no lugar de `criada_em`); seção 12 |
+| ~~Re-roteamento de fila removida~~ | Entrou na entrega; o furo do `SKIP LOCKED` está na seção 12 |
+| Capacidade da IA (decisão 39) | Plano de 2 dias. Rodada 3: conta só `timeout_agente` pendentes das atribuições dela; evento parado na outbox não conta (11.5); conferida só pelo distribuidor, sem travar a linha da IA (hoje travada a cada atribuição, seção 12) |
 | Devolução para a IA, se o piso do dia 1 a tirar | Plano de 2 dias |
-| Reconciliador como serviço com banco próprio; I5 a I7 | Fica o script com I1 a I4 |
+| Reconciliador como serviço com banco próprio; I7; I3 por conteúdo; I1 pela cobertura do juiz; rodar por execução | Fica a consulta sob demanda com I1, I1b e I2 a I6 (11.6) |
 | Reprocessamento do 500 repetido pela `id_atribuicao` (11.4) | Na entrega o 500 repetido já vai a `helpdesk.erros` depois de `RETENTATIVAS_MAX`; falta o reprocessamento que escala. Até lá a conversa escala pelo `timeout_agente` pendente |
 | E2, E3, E4, E4b, E5, E7, E8, E9; repetições; carga de horas | Plano de 2 dias. Rodada 3: previsões e matriz do E4 em impl 14 |
 | Prometheus e Grafana; várias instâncias | Plano de 2 dias |
