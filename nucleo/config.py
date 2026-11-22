@@ -45,6 +45,7 @@ CAPACIDADE_IA = _int("CAPACIDADE_IA", 2000)
 PRAZO_RESPOSTA_S = _int("PRAZO_RESPOSTA_S", 120)
 OUTBOX_LIMITE_S = _int("OUTBOX_LIMITE_S", 60)
 WORKERS_ATIVOS = _bool("WORKERS_ATIVOS")
+DB_POOL = _int("DB_POOL", 10)  # por processo; API com 4 processos + trabalhador cabem nas 100 conexões
 
 
 def chaves() -> dict:

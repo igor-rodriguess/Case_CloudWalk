@@ -25,7 +25,8 @@ RESERVAR = """
 UPDATE outbox SET status = 'enviando', reservado_ate = now() + make_interval(secs => :reserva)
 WHERE id = (
     SELECT o.id FROM outbox o
-    WHERE (o.status = 'pendente' AND o.proxima_tentativa <= now()
+    WHERE o.status IN ('pendente', 'enviando')          -- casa o índice parcial ix_outbox_pendentes
+      AND (o.status = 'pendente' AND o.proxima_tentativa <= now()
            OR o.status = 'enviando' AND o.reservado_ate < now())
       AND NOT EXISTS (
           SELECT 1 FROM outbox p

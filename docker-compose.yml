@@ -65,14 +65,14 @@ services:
         condition: service_healthy
     command: ["alembic", "upgrade", "head"]
 
-  # API do help desk (OpenAPI em http://localhost:8000/docs) e laços de fundo.
+  # API do help desk (OpenAPI em http://localhost:8000/docs), com 4 processos e sem laços.
   nucleo:
     image: helpdesk-app
     restart: on-failure
-    command: ["uvicorn", "nucleo.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["uvicorn", "nucleo.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
     ports:
       - "${NUCLEO_PORTA:-8000}:8000"
-    environment:
+    environment: &ambiente_nucleo
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-helpdesk}:${POSTGRES_PASSWORD:-helpdesk}@postgres:5432/helpdesk
       BROKER_URL: http://broker:8100
       CANAIS_URL: http://canais:8300
@@ -81,6 +81,7 @@ services:
       FENCING_ATIVO: ${FENCING_ATIVO:-true}
       TIMEOUT_ATIVO: ${TIMEOUT_ATIVO:-true}
       TIMEOUT_AGENTE_S: ${TIMEOUT_AGENTE_S:-30}
+      WORKERS_ATIVOS: "false"
     depends_on:
       migracoes:
         condition: service_completed_successfully
@@ -89,6 +90,18 @@ services:
       interval: 3s
       timeout: 3s
       retries: 30
+
+  # Laços de fundo do núcleo: relay da outbox, agendador e distribuidor.
+  trabalhador:
+    image: helpdesk-app
+    restart: on-failure
+    command: ["python", "-m", "nucleo.trabalhador"]
+    environment:
+      <<: *ambiente_nucleo
+      WORKERS_ATIVOS: "true"
+    depends_on:
+      migracoes:
+        condition: service_completed_successfully
 
   broker:
     image: helpdesk-app

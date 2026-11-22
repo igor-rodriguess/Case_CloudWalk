@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from nucleo import config
 
-engine = create_async_engine(config.DATABASE_URL, pool_size=20, max_overflow=20, pool_pre_ping=True)
+engine = create_async_engine(config.DATABASE_URL, pool_size=config.DB_POOL, max_overflow=config.DB_POOL // 2,
+                             pool_pre_ping=True)
 Sessao = async_sessionmaker(engine, expire_on_commit=False)
 
 

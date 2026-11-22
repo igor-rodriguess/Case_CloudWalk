@@ -34,7 +34,7 @@ def preparar(cenario: str, posicao: str) -> dict:
     env = {**os.environ, "OUTBOX_ATIVA": "true", "INBOX_ATIVA": "true"}
     for chave in CHAVES[cenario]:
         env[chave] = valor
-    subprocess.run(["docker", "compose", "up", "-d", "broker", "agente_mock", "canais", "nucleo"],
+    subprocess.run(["docker", "compose", "up", "-d", "broker", "agente_mock", "canais", "nucleo", "trabalhador"],
                    cwd=RAIZ, env=env, check=True, capture_output=True)
     esperado = {k: env[k] == "true" for k in ("OUTBOX_ATIVA", "INBOX_ATIVA")}
     for _ in range(120):

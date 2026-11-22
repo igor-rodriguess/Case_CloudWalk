@@ -57,6 +57,8 @@ FILAS_V1 = {
 
 async def semear() -> None:
     async with unidade() as s:
+        # Vários processos sobem juntos: a trava garante uma semeadura só.
+        await s.execute(text("SELECT pg_advisory_xact_lock(7)"))
         ja = (await s.execute(text("SELECT count(*) FROM atendentes"))).scalar()
         if ja:
             return

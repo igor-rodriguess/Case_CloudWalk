@@ -52,8 +52,10 @@ async def volta(produtor: AIOKafkaProducer) -> None:
                 if agora >= ate:
                     consumidor.resume(tp)
                     pausadas.pop(tp)
-            lotes = await consumidor.getmany(timeout_ms=500, max_records=100)
-            for tp, mensagens in lotes.items():
+            lotes = await consumidor.getmany(timeout_ms=500, max_records=500)
+
+            async def particao(tp, mensagens):
+                # Partições em paralelo; dentro de cada uma, uma mensagem por vez (ordem da conversa).
                 for msg in mensagens:
                     try:  # o esquema é conferido pelo núcleo, que tolera tipo novo da 1.x
                         corpo = json.loads(msg.value)
@@ -85,7 +87,9 @@ async def volta(produtor: AIOKafkaProducer) -> None:
                     consumidor.seek(tp, msg.offset)
                     consumidor.pause(tp)
                     pausadas[tp] = agora + min(30, 0.5 * 2 ** min(falhas_500.get((tp, msg.offset), 1), 6))
-                    break
+                    return
+
+            await asyncio.gather(*(particao(tp, msgs) for tp, msgs in lotes.items()))
     finally:
         await consumidor.stop()
         await http.aclose()
