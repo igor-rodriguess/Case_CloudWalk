@@ -1,0 +1,30 @@
+{
+  "enviadas": 7469,
+  "recusadas": 0,
+  "perdidas": 1455,
+  "duplicadas": 0,
+  "escaladas": 25,
+  "esperando_humano": 38,
+  "respondidas": 5951,
+  "espera_p95_s": 37.736,
+  "p95_interna_s": null,
+  "recuperacao_s": 16.1,
+  "cenario": "E6",
+  "posicao": "desligada",
+  "chaves": {
+    "OUTBOX_ATIVA": false,
+    "INBOX_ATIVA": true
+  },
+  "conversas_por_s": 4.15,
+  "msg_por_s_total": 49.8,
+  "aquecimento_s": 420,
+  "medicao_s": 300,
+  "semente": 42,
+  "envios_agenda": 12701,
+  "falha": {
+    "servico": "broker",
+    "parou_em": 1795333654.0172758,
+    "voltou_em": 1795333719.781691
+  },
+  "execucao": "E6-desligada-1795333171"
+}
