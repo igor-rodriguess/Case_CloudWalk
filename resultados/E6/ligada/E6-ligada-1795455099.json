@@ -1,0 +1,32 @@
+{
+  "enviadas": 7469,
+  "recusadas": 0,
+  "perdidas": 0,
+  "duplicadas": 0,
+  "escaladas": 0,
+  "esperando_humano": 41,
+  "respondidas": 7428,
+  "espera_p95_s": 57.796,
+  "p95_interna_s": 18.016,
+  "recuperacao_s": 109.4,
+  "respostas_ligadas_exata": 12643,
+  "respostas_ligadas_por_ordem": 0,
+  "cenario": "E6",
+  "posicao": "ligada",
+  "chaves": {
+    "OUTBOX_ATIVA": true,
+    "INBOX_ATIVA": true
+  },
+  "conversas_por_s": 4.15,
+  "msg_por_s_total": 49.8,
+  "aquecimento_s": 420,
+  "medicao_s": 300,
+  "semente": 42,
+  "envios_agenda": 12701,
+  "falha": {
+    "servico": "broker",
+    "parou_em": 1795455581.936586,
+    "voltou_em": 1795455649.4506557
+  },
+  "execucao": "E6-ligada-1795455099"
+}
