@@ -1,0 +1,29 @@
+{
+  "enviadas": 7469,
+  "recusadas": 0,
+  "perdidas": 0,
+  "duplicadas": 0,
+  "escaladas": 0,
+  "esperando_humano": 0,
+  "respondidas": 7469,
+  "espera_p95_s": 47.229,
+  "p95_interna_s": null,
+  "recuperacao_s": null,
+  "cenario": "E1",
+  "posicao": "desligada",
+  "chaves": {
+    "OUTBOX_ATIVA": false,
+    "INBOX_ATIVA": false
+  },
+  "conversas_por_s": 4.15,
+  "msg_por_s_total": 49.8,
+  "aquecimento_s": 420,
+  "medicao_s": 300,
+  "semente": 42,
+  "envios_agenda": 12701,
+  "falha": null,
+  "execucao": "E1-desligada-1795453686",
+  "respostas_ligadas_exata": 0,
+  "respostas_ligadas_por_ordem": 12701,
+  "rejulgado": true
+}
