@@ -8,3 +8,21 @@
 {"cenario": "E3b", "posicao": "ligada", "msg_por_s_total": 49.8, "enviadas": 7469, "recusadas": 0, "perdidas": 0, 
 "duplicadas": 0, "escaladas": 0, "espera_p95_s": 17.719, "p95_interna_s": 0.103, "recuperacao_s": null, "duracao_min": 
 14.5}
+
+{"cenario": "E3b", "posicao": "desligada", "msg_por_s_total": 49.8, "enviadas": 7469, "recusadas": 0, "perdidas": 0, 
+"duplicadas": 704, "escaladas": 0, "espera_p95_s": 30.381, "p95_interna_s": 0.117, "recuperacao_s": null, 
+"duracao_min": 19.6}
+{"cenario": "E1", "posicao": "ligada", "msg_por_s_total": 49.8, "enviadas": 7469, "recusadas": 0, "perdidas": 0, 
+"duplicadas": 0, "escaladas": 0, "espera_p95_s": 27.265, "p95_interna_s": 0.102, "recuperacao_s": null, "duracao_min": 
+16.4}
+{"cenario": "E1", "posicao": "desligada", "msg_por_s_total": 49.8, "enviadas": 7469, "recusadas": 0, "perdidas": 0, 
+"duplicadas": 0, "escaladas": 0, "espera_p95_s": 47.229, "p95_interna_s": null, "recuperacao_s": null, "duracao_min": 
+22.2}
+
+
+
+{"cenario": "E6", "posicao": "ligada", "msg_por_s_total": 49.8, "enviadas": 7469, "recusadas": 0, "perdidas": 0, 
+"duplicadas": 0, "escaladas": 0, "espera_p95_s": 57.796, "p95_interna_s": 18.016, "recuperacao_s": 109.4, 
+"duracao_min": 25.4}
+
+
