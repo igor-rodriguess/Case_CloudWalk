@@ -85,7 +85,7 @@ Mede a robustez da plataforma, não a qualidade das respostas do agente.
 - **Ablação:** uma versão só, com chaves que desligam cada proteção. Cada cenário roda com a chave que ele testa ligada e desligada.
 - **Cenários:** E1 base (outbox e inbox juntas), E3b reenvio de 10% das mensagens pelo canal 2 s depois (inbox), E6 broker fora por 60 s (outbox).
 - **Carga:** gerador Python (`carga/gerador.py`, no lugar do k6), 6 mensagens por conversa, 84 s entre elas, 7 min de aquecimento e 5 min medidos, agenda com semente fixa (`carga/agenda.py`; `--semente` de `carga/rodar.py`, padrão 42). A meta era 100 msg/s (8,3 conversas/s); num teste com o código anterior às correções de desempenho a máquina saturou perto de 70 msg/s no total (~35 de cliente), então as execuções rodam no plano B do documento: **50 msg/s nas duas direções (4,15 conversas/s)**, com o banco limpo e o código do commit atual. As previsões foram reescalonadas para 50 msg/s antes de ver a tabela (`docs/implementacao.md`, seção 14).
-- **Juiz nas pontas:** conta o que o cliente enviou e o que o canal entregou; liga cada resposta à mensagem pelo banco do núcleo.
+- **Juiz nas pontas:** conta o que o cliente enviou e o que o canal entregou. Liga cada resposta à mensagem pelo banco do núcleo: com a outbox ligada, de forma exata (o evento que o agente respondeu diz qual mensagem carregava); com a outbox desligada não há esse registro e vale a regra por ordem (a resposta pertence à última mensagem do cliente antes dela).
 - **p95 interna:** da entrada da mensagem ao ack do broker, só para `mensagem.recebida` e só com a outbox ligada (desligada, não há linha de outbox: "—"). A 1ª mensagem de cada conversa fica fora da amostra.
 - **Recuperação (E6):** da volta do broker até a última resposta entregue das mensagens enviadas durante a falha.
 - O reconciliador (`GET /supervisor/reconciliacao`: I1, I1b, I2 a I6) é consulta sob demanda; não roda por execução do lote.
@@ -97,7 +97,23 @@ Mede a robustez da plataforma, não a qualidade das respostas do agente.
 
 ## Resultados
 
-RESULTADOS_AQUI
+Uma execução por cenário e posição, 50 msg/s, 5 min medidos (7.469 mensagens do cliente em cada). Dados brutos em `resultados/<cenario>/<posicao>/` (CSV por mensagem e JSON com as métricas); tabela gerada por `python -m carga.tabelas`.
+
+| Cenário | Proteção | Recusadas | Perdidas | Duplicadas | Escaladas | Espera p95 até a 1ª resposta | p95 interna | Recuperação |
+|---|---|---|---|---|---|---|---|---|
+| E1 base | desligada | 0 | 0 | 0 | 0 | 47,2 s | — | — |
+| E1 base | ligada | 0 | 0 | 0 | 0 | 27,3 s | 0,10 s | — |
+| E3b reenvio do canal | inbox desligada | 0 | 0 | **637** | 0 | 30,4 s | 0,12 s | — |
+| E3b reenvio do canal | inbox ligada | 0 | 0 | **0** | 0 | 17,7 s | 0,10 s | — |
+| E6 broker fora 60 s | outbox desligada | 0 | **1.455** | 0 | 25 | 37,7 s | — | 16,1 s |
+| E6 broker fora 60 s | outbox ligada | 0 | **0** | 0 | 0 | 57,8 s | 18,0 s | 109,4 s |
+
+**Leitura, contra a previsão escrita antes de rodar:**
+- **H1 confirmada nos dois cenários de falha.** No E3b, sem a inbox, 637 dos 722 reenvios da janela (88%) viraram resposta duplicada para o cliente; com a inbox, zero. Os 85 que não duplicaram estão quase todos nas duas últimas mensagens da conversa (80 com k = 4 ou 5), onde o reenvio conta como uma troca a mais e antecipa o fim da conversa pelo mock (6 trocas); o mecanismo exato não foi investigado. No E6, sem a outbox, 1.455 mensagens (19%) ficaram sem resposta e sem escala: o `POST` direto falhou e, como o prazo do agente só nasce no envio, nada escalou. Com a outbox, **zero perda e zero duplicata**: o que estava na fila durante os 60 s foi entregue depois, com atraso (p95 interna de 18 s nessa execução, contra 0,1 s sem falha). 41 mensagens foram enviadas a conversas que já tinham escalado (coluna "esperando humano" do JSON): são as escalas por timeout das respostas presas no caminho de volta quando o broker caiu, previstas na seção 14 (20 a 30 escaladas); a escala delas não entra na coluna "Escaladas" porque a resposta do agente também chegou, e o juiz dá precedência à resposta.
+- **Recuperação acima da previsão.** O E6 ligado levou 109 s para entregar a última resposta das mensagens enviadas durante a falha, contra até ~70 s previstos. A previsão contava só o teto do backoff do relay (60 s); a drenagem da fila acumulada no caminho de volta, na mesma máquina, levou mais do que os "segundos" estimados. O E6 desligado "recupera" em 16 s porque não há fila: o que falhou foi perdido.
+- **E1 sem falha:** zero perda e zero duplicata nas duas posições, como previsto. A p95 interna da posição ligada ficou em 0,10 s, abaixo da meta de 500 ms.
+- **Espera até a 1ª resposta alta (17 a 47 s) em todos os cenários.** Não estava na previsão. A p95 interna (núcleo até o broker) é de 0,1 s, então o tempo está no caminho de volta: broker, Kafka, mock e de novo o núcleo, todos na mesma máquina com o gerador. Hipótese: o mock e o consumidor da volta do broker são o gargalo a essa carga. A diferença entre as posições do E1 (47 s × 27 s, ao contrário do previsto) não é atribuível à proteção: as execuções rodaram em sequência sobre o mesmo banco, e a desligada foi a última, com o banco maior. Uma repetição só não separa esse efeito.
+- **Juiz corrigido no meio do experimento.** A primeira execução do E6 ligado (arquivada em `resultados/_juiz_antigo/`) mostrou 7 perdidas e 7 duplicadas. Eram as mesmas 7 conversas: a resposta atrasada da mensagem enviada no primeiro 1,6 s da queda chegou depois da mensagem seguinte (84 s), e a regra por ordem a atribuiu à seguinte. O juiz passou a ligar a resposta de forma exata quando a outbox existe: E1 e E3b desligada foram rejulgados com ele (`carga/rejulgar.py`) e o E6 ligado foi refeito. O E3b ligado foi julgado pela regra antiga, com o banco já apagado; ela só erra com resposta atrasada além da mensagem seguinte, o que não ocorre sem falha (zero perdidas e zero duplicadas). Na posição desligada a regra por ordem continua e esse erro pode existir lá (no E6 desligado as respostas não atrasam, porque não há retentativa).
 
 ## Limitações
 
