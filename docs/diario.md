@@ -4,6 +4,25 @@ Uma entrada por parte construída. A última entrada diz onde paramos.
 
 ---
 
+## Ponto de controle, dia 2 (2026-11-22 e 23): experimento e fechamento
+
+**Estado:** E1, E3b e E6 rodados nas duas posições a 50 msg/s; tabela e leitura no README. Rodadas 4 e 5 do validador aplicadas. Testes: 36 unitários, 9 de integração (`testes/test_integracao.py`), 18 verificações de fumaça.
+
+### O que aconteceu, em ordem
+1. **Primeiro lote a 100 msg/s saturou.** O E6 ligado deu p95 interna de 81 s e milhares de recusas. `pg_stat_user_tables` mostrou 84 mil varreduras completas na `outbox`, 52 mil em `conversas` e 24 mil em `agendamentos`. Correções (`64751c9`): migration 0003 com três índices, relay usando o índice parcial, API com 4 processos, laços de fundo no serviço `trabalhador`, partições da volta do broker em paralelo.
+2. **Teste de carga cheia depois das correções:** o sistema acompanhou ~35 a 38 msg/s de cliente (70 a 76 no total) e começou a recusar acima disso. Pelas mensagens gravadas por minuto no banco (pico de 2.325 de cliente por minuto). O JSON dessa execução não foi gravado: o gerador travou antes do fim. **Decisão:** plano B do documento, 50 msg/s no total.
+3. **Gerador travado.** `py-spy dump` mostrou o processo preso no pool do `httpcore`, com milhares de requisições na fila e cancelamentos por `wait_for`. Correção: semáforo de 150 requisições em voo, sem cancelamento.
+4. **Rodada 5 do validador (8,5 / 8,5).** Primeira com o código na nota. Corrigidos: a volta do broker morria em silêncio (agora reinicia e `/saude` dá 503); o mock confirmava offset com falha; mensagem podia cair em conversa recém-resolvida (`FOR UPDATE`); esgotamento do relay escala na mesma transação do `erro`. O teste de integração achou mais um: evento de tipo desconhecido dava 500.
+5. **Lote a 50 msg/s.** Rodou em duas partes porque o Docker parou durante a madrugada (3 execuções em 22/11, 3 em 23/11).
+6. **Juiz corrigido.** O E6 ligado mostrou 7 perdidas e 7 duplicadas: as mesmas 7 conversas, resposta atrasada atribuída pela ordem à mensagem seguinte. O juiz passou a ligar a resposta de forma exata pela outbox quando ela existe; E1 e E3b desligada rejulgados, E6 ligado refeito. O resultado antigo está em `resultados/_juiz_antigo/`.
+
+### Para a banca
+- *Por que 50 e não 100 msg/s?* A máquina sozinha roda gerador, broker, Kafka, Postgres e mock; o sistema recusou perto de 70. Declarado nas limitações; a meta de 100 fica sem evidência.
+- *O juiz errou?* Sim, numa regra declarada como limitação. O erro foi achado pelo padrão (sempre a mensagem seguinte da mesma conversa), corrigido e a execução refeita. O resultado antigo foi guardado.
+- *Por que a espera até a resposta é de dezenas de segundos?* A p95 interna é 0,1 s; o tempo está no caminho de volta (broker, Kafka, mock) na mesma máquina. Hipótese, não medida por componente.
+
+---
+
 ## Ponto de controle, fim do dia 1 (2026-11-21): backend no ar
 
 **Commits:** `796bc35` contrato, `b768593` arquitetura, `f60bc0a` backend, `b52a667` testes.
