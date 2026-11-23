@@ -25,10 +25,10 @@ def main() -> None:
     p.add_argument("--aquecimento", type=float, default=420)
     p.add_argument("--medicao", type=float, default=300)
     p.add_argument("--conversas-por-s", type=float, default=4.15)
-    p.add_argument("--so", nargs="*", default=None, help="ex.: E6 E3b")
+    p.add_argument("--so", nargs="*", default=None, help="ex.: E6 E3b, ou E3b:desligada")
     a = p.parse_args()
     for cenario, posicao in ORDEM:
-        if a.so and cenario not in a.so:
+        if a.so and cenario not in a.so and f"{cenario}:{posicao}" not in a.so:
             continue
         drenagem = 150 if cenario == "E6" else 90
         inicio = time.time()

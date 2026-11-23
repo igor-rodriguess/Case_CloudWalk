@@ -48,6 +48,30 @@ def julgar(registros, janela_ini: float, janela_fim: float, falha: dict | None =
             """,
             (conversas,),
         ).fetchall()
+        # Correspondência exata, quando a outbox existe (OUTBOX_ATIVA = true): o evento que o
+        # agente respondeu diz qual mensagem do cliente ele carregava. Com a outbox desligada não
+        # há essa linha e vale a regra por ordem (limitação declarada).
+        enviados = c.execute(
+            """
+            SELECT o.payload->>'id_evento', o.payload->>'tipo', o.payload->'dados'
+            FROM outbox o
+            WHERE o.id_conversa = ANY(%s::uuid[]) AND o.destino = 'broker'
+              AND o.payload->>'tipo' IN ('mensagem.recebida', 'conversa.atribuida', 'conversa.devolvida')
+            """,
+            (conversas,),
+        ).fetchall()
+
+    externo_por_id = {id_msg: id_ext for _c, autor, _causa, _seq, id_ext, id_msg in msgs if autor == "cliente"}
+    externo_por_evento = {}               # id_evento enviado ao agente -> id_externo da mensagem
+    for id_evento, tipo, dados in enviados:
+        dados = dados or {}
+        if tipo == "mensagem.recebida":
+            id_msg = dados.get("id_mensagem")
+        else:
+            do_cliente = [m for m in dados.get("historico", []) if m.get("autor") == "cliente"]
+            id_msg = do_cliente[-1]["id"] if do_cliente else None
+        if id_msg in externo_por_id:
+            externo_por_evento[id_evento] = externo_por_id[id_msg]
 
     clientes = defaultdict(list)          # conversa -> [(seq, id_externo)]
     ia_por_causa = {}                     # (conversa, causado_por) -> seq
@@ -59,6 +83,7 @@ def julgar(registros, janela_ini: float, janela_fim: float, falha: dict | None =
     for lista in clientes.values():
         lista.sort()
 
+    contagem_regra = defaultdict(int)     # quantas respostas ligadas por cada regra
     respostas = defaultdict(list)         # id_externo -> [instantes]
     transferencias = defaultdict(list)    # conversa -> [instantes]
     for conv, autor, causa, _seq, quando in entregas:
@@ -68,6 +93,11 @@ def julgar(registros, janela_ini: float, janela_fim: float, falha: dict | None =
             continue
         if autor != "ia":
             continue
+        if causa in externo_por_evento:
+            respostas[externo_por_evento[causa]].append(quando)
+            contagem_regra["exata"] += 1
+            continue
+        contagem_regra["por_ordem"] += 1
         seq_ia = ia_por_causa.get((conv, causa))
         if seq_ia is None:
             continue
@@ -121,5 +151,7 @@ def julgar(registros, janela_ini: float, janela_fim: float, falha: dict | None =
         "espera_p95_s": round(p95(esperas), 3) if esperas else None,
         "p95_interna_s": round(p95([float(x[0]) for x in internas]), 3) if internas else None,
         "recuperacao_s": recuperacao,
+        "respostas_ligadas_exata": contagem_regra["exata"],
+        "respostas_ligadas_por_ordem": contagem_regra["por_ordem"],
     }
     return metricas, linhas
