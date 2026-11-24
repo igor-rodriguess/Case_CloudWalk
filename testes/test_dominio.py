@@ -143,3 +143,28 @@ class TestEscolha:
         assert escolher([self.c(0, 3), self.c(0, 0, disponivel=False)]).id is None
         cheio, livre = self.c(0, 3), self.c(1, 0)
         assert escolher([cheio, livre]).id == livre.id
+
+
+class TestSla:
+    def test_pausar_e_retomar_nao_alteram_o_acumulado(self):
+        from datetime import datetime, timedelta, timezone
+
+        from nucleo.dominio import sla
+
+        t0 = datetime(2026, 11, 24, 12, 0, tzinfo=timezone.utc)
+        acc, desde = sla.retomar(0, None, t0)                      # cliente escreve: corre
+        acc, desde = sla.pausar(acc, desde, t0 + timedelta(seconds=30))  # atendente responde
+        assert (acc, desde) == (30_000, None)
+        assert sla.pausar(acc, desde, t0 + timedelta(minutes=10)) == (30_000, None)  # pausar de novo
+        assert sla.decorrido_ms(acc, desde, t0 + timedelta(hours=1)) == 30_000      # pausado não corre
+        acc, desde = sla.retomar(acc, desde, t0 + timedelta(minutes=20))
+        assert sla.retomar(acc, desde, t0 + timedelta(minutes=21)) == (acc, desde)  # retomar de novo
+        acc, desde = sla.pausar(acc, desde, t0 + timedelta(minutes=20, seconds=5))
+        assert acc == 35_000
+
+    def test_limite_por_prioridade_e_geral(self):
+        from nucleo.dominio.sla import limite_da_fila
+
+        fila = {"slas": [{"prioridade": 3, "limite_s": 300}, {"prioridade": None, "limite_s": 1800}]}
+        assert limite_da_fila(fila, 3) == 300 and limite_da_fila(fila, 1) == 1800
+        assert limite_da_fila({}, 2) is None

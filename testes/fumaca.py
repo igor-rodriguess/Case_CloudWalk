@@ -121,6 +121,7 @@ def main() -> None:
     checar("7 sem resposta duplicada (I3)", rec["I3_resposta_duplicada"]["total"] == 0)
     checar("7 sem resposta fora de dono (I4)", rec["I4_resposta_fora_de_dono"]["total"] == 0)
     checar("7 sem conversa aberta duplicada (I6)", rec["I6_conversa_aberta_duplicada"]["total"] == 0)
+    checar("7 toda escala com nota de handoff (I7)", rec["I7_escala_sem_nota"]["total"] == 0)
     checar("7 capacidade consistente (I5)", rec["I5_capacidade"]["total"] == 0)
 
     print()

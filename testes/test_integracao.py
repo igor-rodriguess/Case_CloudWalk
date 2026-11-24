@@ -239,3 +239,180 @@ def test_fila_da_equipe_filtra_antes_do_limite():
     assert str(da_equipe) in br
     assert us and all(x["id_fila"] in ("escalas-jim", "jim-geral") for x in us)
     assert ninguem == []
+
+
+def test_item_envenenado_estaciona_so_a_sua_conversa_e_o_replay_restaura_a_ordem():
+    from nucleo.infra.relay import RESERVAR
+
+    reservar = RESERVAR.replace(":reserva", "%s")
+    sql("UPDATE outbox SET status = 'enviado' WHERE status IN ('pendente', 'enviando')")  # isola o teste
+    envenenada, outra = nova_conversa(), nova_conversa()
+
+    def item(conv, seq, status="pendente"):
+        sql("INSERT INTO outbox (id_evento, id_conversa, sequencia, destino, payload, status) "
+            "VALUES (%s, %s, %s, 'broker', '{}', %s) RETURNING id", uuid.uuid4(), conv, seq, status)
+        return sql("SELECT id FROM outbox WHERE id_conversa = %s AND sequencia = %s", conv, seq)[0][0]
+
+    ruim = item(envenenada, 1, "erro")
+    depois = [item(envenenada, 2), item(envenenada, 3)]
+    livre = item(outra, 1)
+    reservados = []
+    while (r := sql(reservar, 30)):
+        reservados.append(r[0][0])
+    assert reservados == [livre]  # a outra conversa segue; a envenenada fica estacionada
+    sql("UPDATE outbox SET status = 'pendente', tentativas = 0, proxima_tentativa = now() WHERE id = %s", ruim)
+    ordem = []
+    while (r := sql(reservar, 30)):
+        ordem.append(r[0][0])
+        sql("UPDATE outbox SET status = 'enviado' WHERE id = %s", r[0][0])
+    assert ordem == [ruim, *depois]  # o replay sai primeiro e os estacionados vêm na ordem
+
+
+def test_webhook_entregue_cinco_vezes_gera_uma_mensagem():
+    from fastapi.testclient import TestClient
+
+    from nucleo.main import app
+
+    corpo = {"canal": "whatsapp", "marca": "infinitepay", "identificador": f"t-{uuid.uuid4().hex[:6]}",
+             "conteudo": "meu repasse não caiu", "id_externo": f"x-{uuid.uuid4().hex[:6]}"}
+    with TestClient(app) as cliente:
+        respostas = [cliente.post("/mensagens", json=corpo).json() for _ in range(5)]
+    assert [r["duplicada"] for r in respostas] == [False, True, True, True, True]
+    assert sql("SELECT count(*) FROM mensagens WHERE id_externo = %s", corpo["id_externo"])[0][0] == 1
+
+
+def _regras_ativas_com(cliente, nova_fila: dict | None) -> int:
+    regras = cliente.get("/filas/ativa").json()["filas"]
+    if nova_fila:
+        regras = {**regras, "filas": [nova_fila, *regras["filas"]]}
+    numero = cliente.post("/filas/versoes", json={"regras": regras, "criada_por": "teste"})
+    assert numero.status_code == 200, numero.text
+    return numero.json()["numero"]
+
+
+def test_operacao_cria_fila_sem_deploy_e_o_proximo_atendimento_cai_nela_e_rollback_em_menos_de_5s():
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from nucleo.main import app
+
+    with TestClient(app) as cliente:
+        anterior = cliente.get("/filas/ativa").json()["numero"]
+        whatsapp = {"id": "ip-whatsapp", "nome": "InfinitePay - WhatsApp", "ordem": 0, "prioridade": 2,
+                    "condicoes": {"todas": [{"campo": "marca", "operador": "igual", "valor": "infinitepay"},
+                                            {"campo": "canal", "operador": "igual", "valor": "whatsapp"},
+                                            {"campo": "origem", "operador": "igual", "valor": "cliente"}]},
+                    "atendentes": [{"tipo": "ia", "id": "ia-infinitepay"}, {"tipo": "equipe", "id": "suporte-br"}]}
+        nova = _regras_ativas_com(cliente, whatsapp)
+        assert cliente.post(f"/filas/versoes/{nova}/ativar").status_code == 200
+        r = cliente.post("/mensagens", json={"canal": "whatsapp", "marca": "infinitepay",
+                                             "identificador": f"w-{uuid.uuid4().hex[:6]}", "conteudo": "oi",
+                                             "id_externo": f"w-{uuid.uuid4().hex[:6]}"}).json()
+        assert sql("SELECT id_fila FROM conversas WHERE id = %s", r["id_conversa"])[0][0] == "ip-whatsapp"
+        inicio = time.perf_counter()
+        assert cliente.post(f"/filas/versoes/{anterior}/ativar").status_code == 200
+        assert time.perf_counter() - inicio < 5
+        assert cliente.get("/filas/ativa").json()["numero"] == anterior
+
+
+def test_pedido_de_atendente_escala_mesmo_sem_fila_de_escalas_nas_regras():
+    """A escala a pedido do cliente está no código, não nas regras: nenhuma versão a desliga."""
+    from fastapi.testclient import TestClient
+
+    from nucleo.main import app
+
+    with TestClient(app) as cliente:
+        anterior = cliente.get("/filas/ativa").json()["numero"]
+        regras = cliente.get("/filas/ativa").json()["filas"]
+        sem_escalas = {**regras, "filas": [f for f in regras["filas"] if not f["id"].startswith("escalas-")]}
+        nova = cliente.post("/filas/versoes", json={"regras": sem_escalas, "criada_por": "teste"}).json()["numero"]
+        assert cliente.post(f"/filas/versoes/{nova}/ativar").status_code == 200
+        ident = f"h-{uuid.uuid4().hex[:6]}"
+        conv = cliente.post("/mensagens", json={"canal": "chat", "marca": "infinitepay", "identificador": ident,
+                                                "conteudo": "meu repasse não caiu",
+                                                "id_externo": f"h-{uuid.uuid4().hex[:6]}"}).json()["id_conversa"]
+        a = analista()
+        atr = uuid.uuid4()
+        sql("INSERT INTO atribuicoes (id, id_conversa, id_atendente) VALUES (%s, %s, %s)", atr, conv, a)
+        sql("UPDATE conversas SET estado = 'com_ia', id_atribuicao_atual = %s WHERE id = %s", atr, conv)
+        r = cliente.post("/mensagens", json={"canal": "chat", "marca": "infinitepay", "identificador": ident,
+                                             "conteudo": "quero falar com um atendente",
+                                             "id_externo": f"h-{uuid.uuid4().hex[:6]}"}).json()
+        assert r["estado"] == "escalada"
+        resumo = sql("SELECT resumo FROM escalas WHERE id_conversa = %s", conv)[0][0]
+        assert resumo and resumo.strip()  # toda escala sai com nota de handoff (I7)
+        cliente.post(f"/filas/versoes/{anterior}/ativar")
+
+
+def test_expurgo_apaga_corpos_vencidos_e_preserva_ouvidoria():
+    from fastapi.testclient import TestClient
+
+    from nucleo.main import app
+
+    def resolvida_com_mensagem(texto: str) -> uuid.UUID:
+        conv = nova_conversa()
+        sql("UPDATE conversas SET estado = 'resolvida', resolvida_em = now() - interval '200 days' WHERE id = %s", conv)
+        sql("INSERT INTO mensagens (id, id_conversa, autor_tipo, conteudo, canal, seq) VALUES (%s, %s, 'cliente', %s, 'chat', 1)",
+            uuid.uuid4(), conv, texto)
+        return conv
+
+    comum, ouvidoria = resolvida_com_mensagem("meu cpf é 000"), resolvida_com_mensagem("reclamação formal")
+    recente = nova_conversa()
+    sql("INSERT INTO mensagens (id, id_conversa, autor_tipo, conteudo, canal, seq) VALUES (%s, %s, 'cliente', 'oi', 'chat', 1)",
+        uuid.uuid4(), recente)
+    with TestClient(app) as cliente:
+        assert cliente.post(f"/painel/conversas/{ouvidoria}/ouvidoria", json={"ouvidoria": True}).status_code == 200
+        r = cliente.post("/supervisor/expurgo", params={"dias": 90}).json()
+    assert r["mensagens"] >= 1
+    assert sql("SELECT conteudo FROM mensagens WHERE id_conversa = %s", comum)[0][0] == "[expurgado]"
+    assert sql("SELECT conteudo FROM mensagens WHERE id_conversa = %s", ouvidoria)[0][0] == "reclamação formal"
+    assert sql("SELECT conteudo FROM mensagens WHERE id_conversa = %s", recente)[0][0] == "oi"
+    assert sql("SELECT count(*) FROM mensagens WHERE id_conversa = %s", comum)[0][0] == 1  # a linha fica
+
+
+def test_pedido_de_atendente_na_fila_escala_e_informa_tempo_estimado():
+    from fastapi.testclient import TestClient
+
+    from nucleo.main import app
+
+    with TestClient(app) as cliente:
+        ident = f"e-{uuid.uuid4().hex[:6]}"
+        conv = cliente.post("/mensagens", json={"canal": "chat", "marca": "infinitepay", "identificador": ident,
+                                                "conteudo": "meu repasse não caiu",
+                                                "id_externo": f"e-{uuid.uuid4().hex[:6]}"}).json()["id_conversa"]
+        assert sql("SELECT estado FROM conversas WHERE id = %s", conv)[0][0] == "na_fila"  # sem distribuidor aqui
+        r = cliente.post("/mensagens", json={"canal": "chat", "marca": "infinitepay", "identificador": ident,
+                                             "conteudo": "quero falar com um atendente",
+                                             "id_externo": f"e-{uuid.uuid4().hex[:6]}"}).json()
+    assert r["estado"] == "escalada"
+    eta = sql("SELECT tempo_estimado_s FROM escalas WHERE id_conversa = %s", conv)[0][0]
+    assert eta is not None and eta >= 0
+    aviso = sql("SELECT payload->>'conteudo' FROM outbox WHERE id_conversa = %s AND destino = 'canal' "
+                "ORDER BY sequencia DESC LIMIT 1", conv)[0][0]
+    assert "especialista" in aviso and ("min" in aviso or "já vai" in aviso)
+
+
+def test_sessao_da_jim_nao_le_linhas_da_infinitepay():
+    """RLS (migration 0006): mesmo pedindo explicitamente a outra marca, nada volta."""
+    from fastapi.testclient import TestClient
+
+    from nucleo.main import app
+
+    conv = nova_conversa()  # infinitepay, com mensagem
+    sql("INSERT INTO mensagens (id, id_conversa, autor_tipo, conteudo, canal, seq) "
+        "VALUES (%s, %s, 'cliente', 'segredo', 'chat', 1)", uuid.uuid4(), conv)
+    with psycopg.connect(f"{BASE}/{NOME}") as c:
+        c.execute("SET LOCAL ROLE leitura_marca")
+        c.execute("SELECT set_config('app.marca', 'jim', true)")
+        assert c.execute("SELECT count(*) FROM conversas WHERE marca = 'infinitepay'").fetchone()[0] == 0
+        assert c.execute("SELECT count(*) FROM mensagens WHERE id_conversa = %s", (conv,)).fetchone()[0] == 0
+        assert c.execute("SELECT count(*) FROM clientes WHERE marca = 'infinitepay'").fetchone()[0] == 0
+        c.rollback()
+        c.execute("SET LOCAL ROLE leitura_marca")
+        c.execute("SELECT set_config('app.marca', 'infinitepay', true)")
+        assert c.execute("SELECT count(*) FROM mensagens WHERE id_conversa = %s", (conv,)).fetchone()[0] == 1
+    with TestClient(app) as cliente:
+        assert cliente.get(f"/conversas/{conv}", params={"marca": "jim"}).status_code == 404
+        assert cliente.get(f"/conversas/{conv}", params={"marca": "infinitepay"}).status_code == 200
+        assert all(x["marca"] == "jim" for x in cliente.get("/conversas", params={"marca": "jim"}).json())

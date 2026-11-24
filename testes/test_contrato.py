@@ -165,3 +165,51 @@ class TestAgenteMockRespondeCadaMensagem:
         env = Envelope.model_validate(evento(id_atribuicao=str(uuid.uuid4())))
         assert mock.respostas_devidas(env) == 1
         assert len(mock.decidir(env, trocas=1)) == 1
+
+
+class TestContratoEntrePlataformaEAgente:
+    """Teste de contrato no lugar do Pact: o esquema publicado é o do modelo, a plataforma só emite
+    envelopes válidos e tudo que o consumidor (agente mock) lê existe no que a plataforma envia."""
+
+    def test_esquema_publicado_bate_com_o_modelo(self):
+        import json
+        from pathlib import Path
+
+        publicado = json.loads((Path(__file__).parent.parent / "contrato" / "esquema-envelope.json").read_text("utf-8"))
+        assert publicado == json.loads(json.dumps(Envelope.model_json_schema(), sort_keys=True)), (
+            "o modelo mudou: regenere contrato/esquema-envelope.json e suba a versão do contrato")
+
+    def _conversa(self):
+        return {"id": uuid.uuid4(), "marca": "infinitepay", "canal": "chat"}
+
+    def test_eventos_da_plataforma_validam_no_envelope(self):
+        from nucleo.dominio.transicionar import novo_evento
+
+        conv = self._conversa()
+        historico = [{"id": str(uuid.uuid4()), "autor": "cliente", "conteudo": "oi", "canal": "chat", "seq": 1,
+                      "criada_em": "2026-11-24T10:00:00+00:00"}]
+        for tipo, dados in [
+            ("mensagem.recebida", {"id_mensagem": str(uuid.uuid4()), "conteudo": "oi", "canal": "chat"}),
+            ("conversa.atribuida", {"cliente": {"id": str(uuid.uuid4()), "nome": "x", "segmento": "pme"},
+                                    "fila": "f", "triagem": {}, "historico": historico, "perfil": {}}),
+            ("conversa.devolvida", {"historico": historico, "nota": ""}),
+        ]:
+            payload = novo_evento(tipo, conv, dados).payload
+            payload["id_atribuicao"] = str(uuid.uuid4())
+            assert Envelope.model_validate(payload).tipo == tipo
+
+    def test_o_que_o_agente_le_existe_no_que_a_plataforma_envia(self):
+        mock = pytest.importorskip("agente_mock.main")
+        from nucleo.dominio.transicionar import novo_evento
+
+        conv = self._conversa()
+        id_msg = str(uuid.uuid4())
+        recebida = novo_evento("mensagem.recebida", conv, {"id_mensagem": id_msg, "conteudo": "meu repasse",
+                                                           "canal": "chat"}).payload
+        recebida["id_atribuicao"] = str(uuid.uuid4())
+        env = Envelope.model_validate(recebida)
+        assert mock._texto_cliente(env) == ("meu repasse", id_msg)
+        respostas = mock.decidir(env, trocas=1)
+        for r in respostas:  # o que o agente devolve também cumpre o contrato e aponta a causa
+            assert Envelope.model_validate(r).causado_por == env.id_evento
+            assert r["id_atribuicao"] == recebida["id_atribuicao"]

@@ -1,0 +1,87 @@
+{
+  "properties": {
+    "causado_por": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Causado Por"
+    },
+    "dados": {
+      "title": "Dados",
+      "type": "object"
+    },
+    "id_atribuicao": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Id Atribuicao"
+    },
+    "id_conversa": {
+      "format": "uuid",
+      "title": "Id Conversa",
+      "type": "string"
+    },
+    "id_evento": {
+      "format": "uuid",
+      "title": "Id Evento",
+      "type": "string"
+    },
+    "marca": {
+      "enum": [
+        "infinitepay",
+        "jim"
+      ],
+      "title": "Marca",
+      "type": "string"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    },
+    "tipo": {
+      "enum": [
+        "conversa.atribuida",
+        "mensagem.recebida",
+        "conversa.devolvida",
+        "conversa.encerrada",
+        "mensagem.enviada",
+        "acao.executada",
+        "conversa.escalada",
+        "conversa.resolvida",
+        "agente.processando"
+      ],
+      "title": "Tipo",
+      "type": "string"
+    },
+    "versao": {
+      "default": "1.0",
+      "pattern": "^1\\.\\d+$",
+      "title": "Versao",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id_evento",
+    "tipo",
+    "id_conversa",
+    "marca",
+    "timestamp"
+  ],
+  "title": "Envelope",
+  "type": "object"
+}
