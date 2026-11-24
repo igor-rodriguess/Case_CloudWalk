@@ -165,3 +165,40 @@ I1, I1b e I2 a I6 com **zero** depois de cada bateria.
 - As duas limitações:
   - **Capacidade.** Entre 60 e 80 msg/s totais numa máquina só. Acima disso o sistema não perde nada, mas a espera cresce sem limite: não há controle de admissão (Evolução). Escalar pede mais processos de trabalhador e da API, o que é seguro porque todo trabalho é reservado com `SKIP LOCKED`, mas não foi testado em mais de uma máquina.
   - **Telas sob carga pesada.** 100 painéis abertos ao mesmo tempo, com o sistema já a 50 msg/s, passam de 1 s. A demo usa poucos. Caminhos prováveis, nenhum medido: cache curto (1–2 s) nas métricas e na fila, ou uma réplica de leitura.
+
+## Rodada de desempenho (24/11, tarde)
+
+A rodada 3 do T4 passou, mas com cauda longa (espera p95 de 91 s com a mediana em 1 s). Um diagnóstico de 16 min a 25 msg/s, com amostras a cada 30 s da outbox, da distribuição e da ida e volta do agente, mais perfis do `py-spy` nos processos, achou as causas abaixo, em ordem.
+
+| # | Causa medida | Correção | Commit |
+|---|---|---|---|
+| 1 | O distribuidor ordenava a fila inteira de espera para cada conversa distribuída; a vazão caía conforme a fila crescia (1.400 → 680 atribuições/min) | Lote ordenado e travado com `SKIP LOCKED`, atribuído numa transação | `b64aa0c` |
+| 2 | Toda atribuição e liberação da IA atualizava a mesma linha `atendentes` da marca e segurava a trava até o COMMIT: fila única por marca (~18 atribuições/s) | A IA não mantém contador; a ocupação dela é contada na leitura | `4689211` |
+| 3 | Pools de conexão menores que a concorrência: conexões extras abrindo e fechando a cada uso (autenticação SCRAM a cada vez); o simulador de canais abria uma conexão por entrega | `DB_POOL=20`, pool no simulador de canais | `b64aa0c` |
+| 4 | A volta do broker processava uma mensagem por vez por partição, com um commit no Kafka por mensagem; o mock processava as partições em série e esperava um ack por resposta | Conversas diferentes em paralelo, ordem por conversa, um commit por lote; mock com partições em paralelo e envio em lote | `b64aa0c` |
+| 5 | O broker, num processo só, chegou a 100% de um núcleo a 50 msg/s do cliente | Dois processos no mesmo grupo de consumo | `d2dce35` |
+| 6 | Log por requisição (httpx e uvicorn) custava CPU sob carga | Desligado | `b64aa0c` |
+
+Uma tentativa intermediária (4 processos do trabalhador com 8 trabalhadores de relay cada, antes das correções 1 e 2) ficou **pior**: mais processos só aumentaram a disputa pela linha da IA e as consultas em vão quando não havia trabalho. O número de trabalhadores por processo voltou a 4 (relay) e 2 (distribuidor).
+
+### Resultado
+
+| Rodada | Entrada (msg/s do cliente) | Respondidas | Duplicatas | Escaladas | Espera p95 | p95 interna | Duração |
+|---|---|---|---|---|---|---|---|
+| 3 (código anterior) | 25,0 | 100.000 | 0 | 0 | 91 s | 33 s | 67 min |
+| Curta, código novo | 25,0 | 15.000 de 15.000 | 0 | 0 | 2,3 s | 0,19 s | 10 min |
+| Curta, código novo | 44,2 (oferta de 50) | 15.000 de 15.000 | 0 | 0 | 9,8 s | 0,44 s | 6 min |
+| **4. 100 mil, código novo** | **45,8 (oferta de 50)** | **100.000 de 100.000** | **0** | **0** | **8,7 s** | **0,45 s** | **37 min** |
+
+- Rodada 4: 20 mil clientes, 5 mensagens cada, todas HTTP 200; reconciliação zerada (I1 a I7); o canal não precisou absorver nenhum reenvio do relay.
+- A oferta foi 50 msg/s do cliente (100 no total, a meta do case). A entrada efetiva ficou em 45,8 porque a API (4 processos) chegou perto de 100% de CPU e o POST p95 subiu para 6,4 s: o gerador, com 100 requisições em voo, não conseguiu mandar mais rápido. É o próximo gargalo.
+- Em regime (depois dos primeiros minutos), o atraso de envio da outbox ficou em 0,2 s (p95) e a ida e volta do agente em ~1,5 s.
+- **C1 revisto:** a ~92 msg/s totais (45,8 do cliente mais as respostas), p95 interna de 0,45 s, abaixo dos 500 ms. O critério, que falhava a 60 msg/s totais, passa perto da meta de 100.
+
+### Hipóteses de robustez e handoff (`carga/hipoteses.py`)
+
+| Hipótese | Montagem | Resultado |
+|---|---|---|
+| H2 | 400 conversas, 2.000 mensagens; 380 reenvios do canal (19%); 20 mensagens envenenadas (1%: o canal recusa a resposta delas com 500); relay derrubado por 38 s no meio; depois, canal corrigido e fila de erros reprocessada | **Passa.** 380 reenvios absorvidos na entrada; 9 saídas esgotaram as tentativas e estacionaram 25 outras da mesma conversa, enquanto as outras conversas seguiam; depois do reprocessamento, 2.000 entregas, 0 duplicatas ao cliente, 0 respostas duplicadas da IA, **0 violações de ordem**, nada pendente |
+| H3 | 1.000 pedidos de atendente de 1.000 clientes novos (chat, WhatsApp, e-mail; 20% JIM) | **Passa.** 1.000 escaladas, 1.000 com nota de handoff, 1.000 com tempo estimado gravado e 1.000 avisos com o tempo entregues ao cliente. O tempo estimado foi de 0 a 52.800 s: com ~800 escalas simultâneas para 9 vagas de analista da InfinitePay, a espera honesta é longa |
+| H1 | 18.000 mensagens de 3.000 clientes com oferta de 100 msg/s do cliente (200 no total); meta: ingestão ao agente p95 < 500 ms e reserva do relay p95 < 50 ms | **Não passa nesta máquina.** Entrada efetiva de 78,2 msg/s do cliente (~156 no total). A outbox acumulou até ~7.300 itens e a ingestão ao agente chegou a p95 de 75 s (amostras em `resultados/hipoteses/H1-outbox-a-cada-30s.csv`). Com a volta atrasada além dos 30 s, 3.090 mensagens foram escaladas por prazo vencido; 12.505 respondidas, 0 perdidas, 0 duplicadas. A reserva do relay (claim) ficou entre 0,5 e 4 ms: essa parte passa. O relay entregou ~80 itens/s com a máquina perto do limite de CPU; 200 msg/s pede mais de uma máquina |
