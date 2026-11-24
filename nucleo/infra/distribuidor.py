@@ -97,10 +97,16 @@ async def _ciclo() -> int:
     return atribuidas
 
 
-async def laco() -> None:
+async def _tarefa(i: int) -> None:
     while True:
         try:
             await _ciclo()
         except Exception:
-            log.exception("distribuidor")
+            log.exception("distribuidor %s", i)
         await asyncio.sleep(config.DISTRIBUIDOR_INTERVALO_S)
+
+
+async def laco() -> None:
+    """Várias tarefas em paralelo: o SKIP LOCKED garante que duas nunca pegam a mesma conversa.
+    Uma tarefa só atendia ~5 conversas novas/s (testes de carga, 23/11)."""
+    await asyncio.gather(*(_tarefa(i) for i in range(config.DISTRIBUIDOR_TAREFAS)))
