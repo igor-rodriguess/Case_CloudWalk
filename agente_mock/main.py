@@ -115,6 +115,8 @@ def decidir(env: Envelope, trocas: int) -> list[dict]:
     saida = []
     for i in range(n):  # sequencia i responde a i-ésima mensagem pendente (contrato.historico)
         frase = frases[min(trocas - n + i, len(frases) - 1)]
+        if "#veneno" in texto:  # experimento H2: a resposta carrega a marca e o canal a recusa
+            frase += " #veneno"
         saida.append(_evento("mensagem.enviada", env, {"conteudo": frase, "sequencia": i}, sequencia=i))
     if trocas >= MOCK_TROCAS:
         saida.append(_evento("conversa.resolvida", env, {"resumo": "Resolvido pelo agente."}))

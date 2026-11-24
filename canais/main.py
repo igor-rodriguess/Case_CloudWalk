@@ -81,6 +81,8 @@ app = FastAPI(title="Simulador de canais", lifespan=ciclo_de_vida)
 async def entregar(e: Entrega):
     if estado["modo"] == "fora":
         return JSONResponse(status_code=503, content={"erro": "canal indisponível"})
+    if estado.get("recusar") and estado["recusar"] in e.conteudo:  # mensagem envenenada (experimento H2)
+        return JSONResponse(status_code=500, content={"erro": "conteúdo recusado pelo canal"})
     async with conexao() as conn:
         cur = await conn.execute(
             "INSERT INTO entregas (id_evento, id_conversa, canal, autor, conteudo, causado_por, sequencia) "
@@ -119,11 +121,13 @@ async def duplicatas():
 
 class Modo(BaseModel):
     modo: Literal["normal", "fora"]
+    recusar: str | None = None  # trecho de conteúdo que o canal recusa com 500 (envenenamento)
 
 
 @app.post("/modo")
 async def mudar_modo(m: Modo):
     estado["modo"] = m.modo
+    estado["recusar"] = m.recusar
     return estado
 
 
