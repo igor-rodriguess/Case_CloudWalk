@@ -304,7 +304,7 @@ Enquadramento geral: "isto foi escolha com efeito declarado, ou é algo que eu c
 
 | Ponto fraco | Como enquadrar |
 |---|---|
-| A meta de 100 msg/s não foi medida; o experimento roda a 50 | Plano B escrito antes (arq 19.2); 50 cobre o pico de estresse com 5x (~35, arq 3). Uma máquina com tudo junto, e o gerador disputa CPU |
+| O experimento de ablação roda a 50 msg/s | Plano B escrito antes (arq 19.2). Depois, os testes de carga mediram ~92 msg/s totais sustentados numa máquina (100 mil mensagens, todas respondidas, espera p95 8,7 s, p95 interna 0,45 s). A 200 msg/s (H1) não acompanha: 200 pede mais de uma máquina, e a escala horizontal não foi testada |
 | Uma repetição por cenário, sem variância | Vale zero contra não zero e ordem de grandeza, não diferenças pequenas (arq 17) |
 | Agente mock com texto fixo; qualidade do resumo não medida | O experimento mede a plataforma, não o agente, que está fora do escopo (TAPI) |
 | Sem disjuntor: com o agente fora, todas as conversas com a IA escalam e as novas continuam indo à IA | Desenho pronto (arq 11.9, com as correções da rodada 3); cortado no plano de 2 dias. É falha metaestável conhecida (Huang et al., 2022, `[revisado]`, resumo) |
@@ -313,8 +313,8 @@ Enquadramento geral: "isto foi escolha com efeito declarado, ou é algo que eu c
 | Juiz depende do banco do núcleo para ligar resposta a mensagem | A contagem é das pontas; só a correspondência vem do banco; supõe uma resposta antes da mensagem seguinte (vale com 84 s entre mensagens) |
 | Fila no caminho de volta conta contra o agente | Resposta presa no broker escala por timeout; aparece como escala, não como perda |
 | Sem inatividade: conversa com humano esperando o cliente ocupa vaga até o analista encerrar | Poucas conversas esquecidas lotam um analista de 3 vagas; inatividade desenhada em arq 11.8 |
-| Sem autenticação; isolamento por marca só por filtro | Perfil escolhido na tela; RLS em Evolução |
-| Uma instância de cada serviço | Os laços usam `SKIP LOCKED` e o código diz que mais de uma instância é segura (`nucleo/trabalhador.py`), mas isso não foi medido (H3, E9) |
+| Sem autenticação | Perfil escolhido na tela. O isolamento por marca existe no banco (RLS com o papel `leitura_marca`, teste negativo), para as leituras feitas em nome de uma marca |
+| Uma máquina só | O trabalhador roda em 4 processos e o broker em 2, em paralelo com `SKIP LOCKED` e grupo de consumo do Kafka, medido nos testes de carga; mais de uma máquina não foi testado |
 | Contrato é proposta nossa | O formato da CloudWalk não é público; o tradutor ficaria no broker, único que fala com o agente |
 | Ablação desliga uma chave por vez | Não mede interação entre proteções |
 | Canais simulados | Janela de 24 h do WhatsApp e encadeamento de e-mail ficam de fora |
@@ -324,7 +324,7 @@ Enquadramento geral: "isto foi escolha com efeito declarado, ou é algo que eu c
 
 Nenhuma delas perde mensagem; são pontos em que o documento diz uma coisa e o código faz outra. Se a banca achar, é "defeito" pela régua; se você declarar antes, é transparência.
 
-1. **Capacidade da IA.** A arq 19.1 e o README dizem "IA sem limite". No código, o seed dá à IA `CAPACIDADE_IA = 2000` (`nucleo/infra/seed.py`) e `transicionar` conta e trava a IA como um humano, por conversas abertas (`_atendente_com_capacidade` e `ativas + 1`), não por trabalho em voo como o desenho pede (arq 3). No experimento, `carga/rodar.py`, `preparar`, sobe a capacidade para 1.000.000, então o experimento está coerente com o README. Fora dele (demo), há teto de 2000 conversas abertas por IA. Enquadre: "no experimento, sem limite; no uso normal, um teto provisório por conversa aberta; a capacidade por trabalho em voo é Evolução".
+1. **Capacidade da IA (corrigida em 24/11).** A IA não tem limite (`CAPACIDADE_IA` = 1.000.000) e não mantém mais o contador `ativas`: atualizar a linha dela a cada atribuição serializava a marca inteira e limitava a distribuição a ~18 conversas/s (medido). A ocupação da IA é contada na leitura. A capacidade por trabalho em voo continua Evolução.
 2. **Envelhecimento de prioridade.** A arq (12, 19.1, decisão 10) diz que é Evolução. O código já soma `floor(espera / ENVELHECIMENTO_S)` (600 s) à prioridade da conversa em `distribuidor.PEGAR`, contando de `na_fila_desde`. Como a prioridade da fila vem antes na ordenação, a espera sem limite de uma fila de prioridade menor que divide equipe com outra continua possível (leitura do código; confira).
 3. **Re-roteamento de fila removida.** A arq 19.1 diz que não entra. O código faz: `nucleo/api/filas.py`, `ativar`, re-roteia conversas em `na_fila` e `escalada` de fila que sumiu (o diário também diz que entrou). Aqui o código está à frente do documento.
 4. **Comentário de `transicionar`.** A docstring diz "Ordem de travas: conversa -> agendamento -> atendente". O código trava o atendente novo antes de cancelar agendamentos, que é a ordem da arq 11.2 e da impl 7.1 (conversa, atendente novo, agendamentos, atendente antigo). O comentário está desatualizado.

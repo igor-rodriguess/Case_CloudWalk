@@ -306,7 +306,7 @@ Números de artigos nesta seção foram conferidos pelo resumo (rótulo em `refe
 - Evento derivado tem id determinístico: `uuid5(causado_por, tipo, sequencia)`.
 - Entrada dos canais: deduplica pela inbox, com `(canal, id_externo)` como chave e a entrada como consumidor; reenvio com o mesmo id não cria mensagem. `id_externo` é sempre gravado em coluna indexada sem unicidade, para o juiz ligar a resposta à mensagem enviada mesmo com a inbox desligada.
 - Inbox `eventos_processados(consumidor, id_evento)` no núcleo (entrada e API do agente) e inbox própria no mock, na mesma transação do efeito. O broker não tem banco nem inbox: só repassa, e a deduplicação fica nas pontas.
-- Saída por canal sem inbox: o simulador faz o papel de um receptor que não controlamos e grava repetidas de propósito. Ela é pelo menos uma vez: um reenvio do relay depois de um `POST` que deu certo sem o resultado gravado (timeout, queda entre as transações) chega duas vezes e conta como duplicata no juiz, também com as chaves ligadas.
+- Saída por canal pelo menos uma vez: um reenvio do relay depois de um `POST` que deu certo sem o resultado gravado (timeout, queda entre as transações, reserva vencida sob pausa) chega duas vezes. Desde 23/11 o adaptador do canal deduplica pelo id do evento e registra o reenvio absorvido (`GET /duplicatas`); o adaptador real de cada canal precisa fazer o mesmo. Antes disso, o teste de 20 mil mensagens mostrou 1 duplicata por esse caminho (`docs/testes-de-carga.md`).
 - `INBOX_ATIVA` só chega ao núcleo; o mock deduplica nas duas posições.
 - Offset confirmado só depois do efeito; a saída por canal também passa pela outbox.
 

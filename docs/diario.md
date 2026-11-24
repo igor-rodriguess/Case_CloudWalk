@@ -4,6 +4,25 @@ Uma entrada por parte construída. A última entrada diz onde paramos.
 
 ---
 
+## Ponto de controle, dia 3 (2026-11-23 e 24): carga, desempenho, front e validação
+
+**Estado:** testes de carga completos, 100 mil mensagens respondidas a ~46 msg/s do cliente, front em `front/`, pontos do roteiro de validação implementados e testados. Testes: 48 unitários, 29 de contrato, 17 de integração, fumaça com I7.
+
+### O que aconteceu, em ordem
+1. **Testes de carga (T1 a T4).** O gerador passou para dentro da rede do Docker: do Windows, o encaminhamento de porta limitava a ~20 req/s. A rampa mostrou o joelho entre 60 e 80 msg/s totais.
+2. **Correções da primeira bateria:** distribuidor em paralelo e índice da fila, IA lida sem trava, trabalhador em 2 processos, canal deduplicando pelo id do evento (1 duplicata em 20 mil, por reserva vencida do relay).
+3. **100 mil respondidas uma a uma.** O mock passou a responder cada mensagem que esperou na fila. A rajada com essa mudança colapsou (prazo do agente vencendo); a mesma carga a 25 msg/s passou com 100%, mas com espera p95 de 91 s.
+4. **Rodada de desempenho.** Diagnóstico com amostras a cada 30 s e `py-spy`: ordenação da fila por conversa, linha da IA como fila única, pools pequenos, volta do broker e mock em série, broker num processo. Corrigidos; a espera p95 caiu para 8,7 s com quase o dobro da taxa. Uma tentativa intermediária (4 processos sem as correções de contenção) piorou e foi revertida em parte.
+5. **Front** (`front/`, Next.js), construído por agente e testado no navegador contra o ambiente no ar.
+6. **Roteiro de validação externo** conferido item a item (`docs/validacao-pontos.md`): validadores de regras, estacionamento de mensagem envenenada, tempo estimado na escala, SLA com pausa, expurgo com ouvidoria, RLS por marca, trace ponta a ponta, contrato por esquema. H2 e H3 passam; H1 (200 msg/s) não passa numa máquina.
+
+### Para a banca
+- *Aguenta 100 mil?* Sim: 100 mil mensagens de 20 mil clientes, todas respondidas, 0 duplicatas, em 37 min a ~92 msg/s totais. Em rajada acima da capacidade não: a fila cresce e o prazo do agente escala para humano, sem perder nem duplicar.
+- *Por que mais processos pioraram antes de melhorar?* A contenção estava numa linha do banco (a da IA) e no laço de cada processo; mais processos só aumentavam a disputa. Primeiro se tira a contenção, depois se escala.
+- *Por que 200 msg/s não passa?* A máquina inteira está perto do limite de CPU com tudo junto; o próximo passo é escalar em mais de uma máquina, o que não foi testado.
+
+---
+
 ## Ponto de controle, dia 2 (2026-11-22 e 23): experimento e fechamento
 
 **Estado:** E1, E3b e E6 rodados nas duas posições a 50 msg/s; tabela e leitura no README. Rodadas 4 e 5 do validador aplicadas. Testes: 36 unitários, 9 de integração (`testes/test_integracao.py`), 18 verificações de fumaça.

@@ -38,7 +38,7 @@ Conferência, item por item, de um roteiro de validação recebido em 24/11/2026
 | Expurgo remove corpos vencidos e preserva ouvidoria | Atende | `POST /supervisor/expurgo`, `POST /painel/conversas/{id}/ouvidoria`; `test_expurgo_...` |
 | Mensagem envenenada estaciona só a sua conversa; o replay restaura a ordem | Atende | relay; `test_item_envenenado_...`; H2 |
 | Um único trace cobre canal, núcleo, broker, agente e retorno | Atende | `GET /conversas/{id}/traco/{id_mensagem}`, cartão na tela da conversa. Trace montado pelos ids do contrato, sem OpenTelemetry |
-| Da clonagem à demo em menos de 30 minutos | Ver `testes-de-carga.md`, "Reprodutibilidade" | |
+| Da clonagem à demo em menos de 30 minutos | Atende | 3,3 min com as imagens base no cache (`testes-de-carga.md`, "Reprodutibilidade") |
 
 ## Hipóteses
 

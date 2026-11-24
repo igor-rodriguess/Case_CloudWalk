@@ -27,7 +27,7 @@ flowchart LR
 - **Agente mock** (`agente_mock/`): faz o papel do agente da CloudWalk, que está fora do escopo. Modos `normal`, `lento`, `duplicar`, `fora`.
 - **Simulador de canais** (`canais/`): a ponta onde o cliente recebe; grava cada entrega para o juiz do experimento.
 
-Garantias: entrega pelo menos uma vez com deduplicação na entrada, na API do agente e no mock (inbox), e saída por canal pelo menos uma vez, sem inbox; outbox transacional, fencing por `id_atribuicao` (resposta atrasada do agente não atropela o humano), prazo do agente contado do ack do broker, auditoria só de inserção com o porquê de cada decisão.
+Garantias: entrega pelo menos uma vez com deduplicação na entrada, na API do agente e no mock (inbox), e saída por canal pelo menos uma vez, deduplicada no adaptador pelo id do evento; outbox transacional, fencing por `id_atribuicao` (resposta atrasada do agente não atropela o humano), prazo do agente contado do ack do broker, auditoria só de inserção com o porquê de cada decisão.
 
 Documentos: [`docs/arquitetura.md`](docs/arquitetura.md) (o quê e por quê, com decisões e referências), [`docs/implementacao.md`](docs/implementacao.md) (como), [`docs/referencias.md`](docs/referencias.md), [`docs/api-front.md`](docs/api-front.md), [`docs/diario.md`](docs/diario.md), revisões em [`docs/revisoes/`](docs/revisoes/).
 
@@ -135,37 +135,46 @@ Uma execução por cenário e posição, 50 msg/s, 5 min medidos (7.469 mensagen
 - **Espera até a 1ª resposta alta (17 a 47 s) em todos os cenários.** Não estava na previsão. A p95 interna (núcleo até o broker) é de 0,1 s, então o tempo está no caminho de volta: broker, Kafka, mock e de novo o núcleo, todos na mesma máquina com o gerador. Hipótese: o mock e o consumidor da volta do broker são o gargalo a essa carga. A diferença entre as posições do E1 (47 s × 27 s, ao contrário do previsto) não é atribuível à proteção: as execuções rodaram em sequência sobre o mesmo banco, e a desligada foi a última, com o banco maior. Uma repetição só não separa esse efeito.
 - **Juiz corrigido no meio do experimento.** A primeira execução do E6 ligado (arquivada em `resultados/_juiz_antigo/`) mostrou 7 perdidas e 7 duplicadas. Eram as mesmas 7 conversas: a resposta atrasada da mensagem enviada no primeiro 1,6 s da queda chegou depois da mensagem seguinte (84 s), e a regra por ordem a atribuiu à seguinte. O juiz passou a ligar a resposta de forma exata quando a outbox existe: E1 e E3b desligada foram rejulgados com ele (`carga/rejulgar.py`) e o E6 ligado foi refeito. O E3b ligado foi julgado pela regra antiga, com o banco já apagado; ela só erra com resposta atrasada além da mensagem seguinte, o que não ocorre sem falha (zero perdidas e zero duplicadas). Na posição desligada a regra por ordem continua e esse erro pode existir lá (no E6 desligado as respostas não atrasam, porque não há retentativa).
 
+### Testes de carga e hipóteses (depois do experimento)
+
+Detalhe em [`docs/testes-de-carga.md`](docs/testes-de-carga.md); validação ponto a ponto em [`docs/validacao-pontos.md`](docs/validacao-pontos.md).
+
+| Teste | Resultado |
+|---|---|
+| 100 mil mensagens de 20 mil clientes, ~46 msg/s do cliente (~92 no total) | 100.000 respondidas, 0 duplicatas, 0 escalas, espera p95 8,7 s, p95 interna 0,45 s, reconciliação zerada, 37 min |
+| H2: 19% de reenvios, relay fora 38 s, 1% de mensagens envenenadas | 0 duplicatas ao cliente, 0 violações de ordem; as envenenadas estacionaram só a sua conversa |
+| H3: 1.000 pedidos de atendente | 1.000 com nota de handoff e tempo estimado informado ao cliente |
+| H1: 200 msg/s no total | Não passa numa máquina (fila cresce; 0 perdas, 0 duplicatas) |
+| Da clonagem à demo | 3,3 min com as imagens base no cache |
+
 ## Limitações
 
 - Ambiente local, agente mock com texto fixo, dados sintéticos, premissas de volume (12 mensagens por atendimento, pico de 5x).
-- Entrega pelo menos uma vez onde não controlamos o receptor; o id determinístico é requisito imposto ao agente. A saída por canal não tem inbox: uma entrega repetida pelo relay (reenvio depois de um envio que deu certo sem o resultado gravado) conta como duplicata no juiz, também com as chaves ligadas.
-- Ordem por conversa e destino deixa de valer depois de um item em `erro` na outbox: reprocessado, ele sai depois dos seguintes.
+- Entrega pelo menos uma vez onde não controlamos o receptor; o id determinístico é requisito imposto ao agente. A saída por canal é deduplicada no adaptador pelo id do evento (desde 23/11): o adaptador real de cada canal precisa fazer o mesmo.
+- Item em `erro` na outbox estaciona os seguintes da mesma conversa até o reprocessamento (a ordem vale, mas a conversa espera o supervisor); as outras conversas seguem (H2).
 - Redpanda de um nó em modo de desenvolvimento, que confirma sem fsync.
 - Fila no caminho de volta conta contra o agente: resposta presa no broker escala por timeout.
 - O formato do contrato é proposta nossa (o da CloudWalk não é público); marca fixa no contrato.
 - Canais simulados: janela de 24 h do WhatsApp e encadeamento de e-mail ficam de fora.
 - A ablação desliga uma chave por vez e não mede interações entre proteções.
 - Postgres sem réplica: falha de disco ou de banco não é testada.
-- Sem autenticação (perfil escolhido na tela); isolamento por marca só por filtro.
+- Sem autenticação (perfil escolhido na tela). O isolamento por marca no banco (RLS, papel `leitura_marca`) vale para as leituras feitas em nome de uma marca; os processos do núcleo atendem as duas marcas com o papel da aplicação.
 - O gerador de carga (Python, no lugar do k6) roda na mesma máquina e disputa CPU com o sistema.
 - A qualidade do resumo de handoff não é medida.
 - Sem inatividade: conversa com humano esperando o cliente ocupa vaga até o analista encerrar.
 - O juiz depende do banco do núcleo para ligar resposta a mensagem e supõe uma resposta antes da mensagem seguinte da conversa.
 - Uma repetição por cenário e posição: sem variância; vale zero contra não zero e a ordem de grandeza.
-- Experimento a 50 msg/s, não a 100. Os testes de carga depois do experimento ([docs/testes-de-carga.md](docs/testes-de-carga.md)) refinaram o limite:
-  - a saturação "perto de 70 msg/s" medida antes misturava o limite do encaminhamento de porta do Docker no Windows (~20 req/s) com o do sistema;
-  - de dentro da rede do Docker, o joelho fica entre 60 e 80 msg/s totais numa máquina só;
-  - acima do joelho nada se perde nem duplica, mas a espera cresce sem controle de admissão;
-  - 100 mil mensagens de 20 mil clientes passaram com 0 conversas sem resposta, 0 duplicatas e reconciliação zerada;
-  - as telas do front passam de 1 s de p95 com 100 clientes e 50 msg/s de fundo.
-
-  A meta de 100 msg/s fica sem evidência.
-- A IA não tem limite na prática (`CAPACIDADE_IA` = 1.000.000, contada em conversas abertas; o limite por custo é Evolução), mas `transicionar` trava a linha da IA a cada atribuição e a atualiza a cada escala e resolução. Isso serializa essas transações por marca e é possível fonte de contenção na saturação (hipótese, não medida).
+- Experimento a 50 msg/s, não a 100. Os testes de carga posteriores ([docs/testes-de-carga.md](docs/testes-de-carga.md)), com o gerador dentro da rede do Docker, mediram a capacidade numa máquina só (14 núcleos lógicos, tudo junto):
+  - ~92 msg/s totais sustentados (45,8 do cliente), com p95 interna de 0,45 s: 100 mil mensagens, todas respondidas, espera p95 de 8,7 s;
+  - a ~156 msg/s totais (hipótese H1, meta de 200) o sistema não acompanha: nada se perde nem duplica, mas a fila cresce e o prazo do agente escala conversas para humano. 200 msg/s pede mais de uma máquina; a escala horizontal não foi testada;
+  - sem controle de admissão: acima da capacidade, a espera cresce sem limite;
+  - as telas do front passam de 1 s de p95 com 100 clientes e 50 msg/s de fundo (medido antes da rodada de desempenho).
+- A IA não tem limite de capacidade (o limite por custo é Evolução) e não mantém contador de ocupação: atualizar a linha dela a cada atribuição serializava a marca inteira (medido em 24/11). A ocupação da IA é contada na leitura.
 - p95 interna só na posição ligada e sem a 1ª mensagem de cada conversa (subestima a latência de quem abre a conversa); a comparação de custo entre as posições fica com a espera até a 1ª resposta.
 - Reconciliador simplificado e sob demanda: I3 não compara conteúdo (não vê a duplicata do E3b) e I1 só olha conversas com a IA; quem mede perda e duplicata é o juiz.
 - Re-roteamento de fila removida pula a conversa travada no instante da ativação (`SKIP LOCKED`); ela só é re-roteada na ativação seguinte. Envelhecimento (`ENVELHECIMENTO_S` = 600 s) é hipótese, sem medida; nenhum dos dois tem teste próprio.
-- Parte dos testes previstos não está automatizada (relay morto, linha que sempre falha, Kafka fora, deadlock, reinício, invariantes plantadas, distribuidor, isolamento por marca): lista e cobertura alternativa em `docs/implementacao.md`, seção 13.
-- Cenários fora da entrega: rampa até 200 msg/s, duplicatas do agente, agente lento e fora como cenário medido, núcleo morto, disjuntor, escalabilidade horizontal. Desenho e previsão em `docs/implementacao.md`, seção 14.
+- Parte dos testes previstos não está automatizada (Kafka fora, deadlock, reinício, invariantes plantadas, distribuidor): lista e cobertura alternativa em `docs/implementacao.md`, seção 13.
+- Cenários fora da entrega: duplicatas do agente, agente lento e fora como cenário medido, núcleo morto, disjuntor, escalabilidade horizontal. Desenho e previsão em `docs/implementacao.md`, seção 14.
 
 ## Evolução
 

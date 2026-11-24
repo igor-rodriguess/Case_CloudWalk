@@ -202,3 +202,18 @@ Uma tentativa intermediária (4 processos do trabalhador com 8 trabalhadores de 
 | H2 | 400 conversas, 2.000 mensagens; 380 reenvios do canal (19%); 20 mensagens envenenadas (1%: o canal recusa a resposta delas com 500); relay derrubado por 38 s no meio; depois, canal corrigido e fila de erros reprocessada | **Passa.** 380 reenvios absorvidos na entrada; 9 saídas esgotaram as tentativas e estacionaram 25 outras da mesma conversa, enquanto as outras conversas seguiam; depois do reprocessamento, 2.000 entregas, 0 duplicatas ao cliente, 0 respostas duplicadas da IA, **0 violações de ordem**, nada pendente |
 | H3 | 1.000 pedidos de atendente de 1.000 clientes novos (chat, WhatsApp, e-mail; 20% JIM) | **Passa.** 1.000 escaladas, 1.000 com nota de handoff, 1.000 com tempo estimado gravado e 1.000 avisos com o tempo entregues ao cliente. O tempo estimado foi de 0 a 52.800 s: com ~800 escalas simultâneas para 9 vagas de analista da InfinitePay, a espera honesta é longa |
 | H1 | 18.000 mensagens de 3.000 clientes com oferta de 100 msg/s do cliente (200 no total); meta: ingestão ao agente p95 < 500 ms e reserva do relay p95 < 50 ms | **Não passa nesta máquina.** Entrada efetiva de 78,2 msg/s do cliente (~156 no total). A outbox acumulou até ~7.300 itens e a ingestão ao agente chegou a p95 de 75 s (amostras em `resultados/hipoteses/H1-outbox-a-cada-30s.csv`). Com a volta atrasada além dos 30 s, 3.090 mensagens foram escaladas por prazo vencido; 12.505 respondidas, 0 perdidas, 0 duplicadas. A reserva do relay (claim) ficou entre 0,5 e 4 ms: essa parte passa. O relay entregou ~80 itens/s com a máquina perto do limite de CPU; 200 msg/s pede mais de uma máquina |
+
+## Reprodutibilidade: da clonagem à demonstração
+
+Medido em 24/11/2026, nesta máquina, seguindo o README a partir de um clone novo do GitHub, com as imagens base (Postgres, Redpanda, Python) já no cache do Docker:
+
+| Passo | Tempo |
+|---|---|
+| `git clone` | 2 s |
+| `docker compose up -d --build` até `/saude` responder | 43 s |
+| venv e `pip install` (para testes e experimento) | 49 s |
+| `testes/fumaca.py` (todas as verificações OK) | 46 s |
+| `npm install` do front | 56 s |
+| **Total** | **3,3 min** |
+
+Sem as imagens no cache, some o download (cerca de 1 GB, depende da rede). O critério de menos de 30 minutos fica com folga nos dois casos.
