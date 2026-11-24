@@ -1,7 +1,10 @@
 """Relay da outbox (docs/implementacao.md 7.3).
 
 Reserva um item por transação (SKIP LOCKED, respeitando a ordem por conversa e destino),
-envia FORA da transação e grava o resultado em outra. O prazo do agente (timeout_agente)
+envia FORA da transação e grava o resultado em outra. Item em `erro` (esgotou as tentativas, a
+mensagem envenenada) estaciona os seguintes da mesma conversa e destino; as outras conversas
+seguem. O reprocessamento (`/outbox/{id}/reprocessar`) devolve o item à fila e os estacionados
+saem depois dele, na ordem. O prazo do agente (timeout_agente)
 só nasce aqui, no ack do broker: atraso da própria plataforma não vira falha do agente.
 """
 
@@ -31,7 +34,7 @@ WHERE id = (
       AND NOT EXISTS (
           SELECT 1 FROM outbox p
           WHERE p.id_conversa = o.id_conversa AND p.destino = o.destino
-            AND p.sequencia < o.sequencia AND p.status IN ('pendente', 'enviando'))
+            AND p.sequencia < o.sequencia AND p.status IN ('pendente', 'enviando', 'erro'))
     ORDER BY o.criado_em
     LIMIT 1
     FOR UPDATE SKIP LOCKED)
