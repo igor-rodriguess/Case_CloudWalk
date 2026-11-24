@@ -136,7 +136,7 @@ async def t1_rampa(degraus=(40, 60, 80, 100, 120, 140, 160, 200), duracao=150.0,
 
 
 # ---------------------------------------------------------------- T2 rajada
-async def t2_rajada(n=20_000, clientes=5_000) -> dict:
+async def t2_rajada(n=20_000, clientes=5_000, nome="T2-rajada") -> dict:
     preparar("E1", "ligada")
     execucao = f"T2-{int(time.time())}"
     rnd = random.Random(7)
@@ -168,7 +168,7 @@ async def t2_rajada(n=20_000, clientes=5_000) -> dict:
     for r in registros:
         status[str(r.status)] += 1
     resultado = {
-        "teste": "T2 rajada", "execucao": execucao, "inicio_epoch": t0, "fim_epoch": t_fim,
+        "teste": nome, "execucao": execucao, "inicio_epoch": t0, "fim_epoch": t_fim,
         "mensagens": n, "clientes": clientes,
         "envio_s": round(t_envio, 1), "vazao_entrada_msg_s": round(n / t_envio, 1),
         "post_p50_s": pct([r.latencia_req_s for r in registros if r.status], 50),
@@ -182,7 +182,7 @@ async def t2_rajada(n=20_000, clientes=5_000) -> dict:
                              "espera_p95_s", "p95_interna_s")},
         "cpu_medio_pct": docker.media(t0, t_fim),
     }
-    salvar("T2-rajada", resultado)
+    salvar(nome, resultado)
     return resultado
 
 
@@ -249,6 +249,9 @@ def main() -> None:
         print(json.dumps(asyncio.run(t2_rajada()), ensure_ascii=False), flush=True)
     if "T3" in a.so:
         print(json.dumps(asyncio.run(t3_leitura()), ensure_ascii=False), flush=True)
+    if "T4" in a.so:  # volume: 100 mil mensagens de 20 mil clientes
+        print(json.dumps(asyncio.run(t2_rajada(n=100_000, clientes=20_000, nome="T4-volume")),
+                         ensure_ascii=False), flush=True)
     if "R" in a.so:
         print(json.dumps(reconciliacao(), ensure_ascii=False), flush=True)
 
