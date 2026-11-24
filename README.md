@@ -132,7 +132,14 @@ Uma execução por cenário e posição, 50 msg/s, 5 min medidos (7.469 mensagen
 - Sem inatividade: conversa com humano esperando o cliente ocupa vaga até o analista encerrar.
 - O juiz depende do banco do núcleo para ligar resposta a mensagem e supõe uma resposta antes da mensagem seguinte da conversa.
 - Uma repetição por cenário e posição: sem variância; vale zero contra não zero e a ordem de grandeza.
-- Carga medida a 50 msg/s, não a 100: numa máquina só, com gerador, broker, Kafka, Postgres e mock juntos, o sistema começou a recusar perto de 70 msg/s no total, num teste com o código anterior às correções de desempenho. A meta de 100 msg/s fica sem evidência.
+- Experimento a 50 msg/s, não a 100. Os testes de carga depois do experimento ([docs/testes-de-carga.md](docs/testes-de-carga.md)) refinaram o limite:
+  - a saturação "perto de 70 msg/s" medida antes misturava o limite do encaminhamento de porta do Docker no Windows (~20 req/s) com o do sistema;
+  - de dentro da rede do Docker, o joelho fica entre 60 e 80 msg/s totais numa máquina só;
+  - acima do joelho nada se perde nem duplica, mas a espera cresce sem controle de admissão;
+  - 100 mil mensagens de 20 mil clientes passaram com 0 conversas sem resposta, 0 duplicatas e reconciliação zerada;
+  - as telas do front passam de 1 s de p95 com 100 clientes e 50 msg/s de fundo.
+
+  A meta de 100 msg/s fica sem evidência.
 - A IA não tem limite na prática (`CAPACIDADE_IA` = 1.000.000, contada em conversas abertas; o limite por custo é Evolução), mas `transicionar` trava a linha da IA a cada atribuição e a atualiza a cada escala e resolução. Isso serializa essas transações por marca e é possível fonte de contenção na saturação (hipótese, não medida).
 - p95 interna só na posição ligada e sem a 1ª mensagem de cada conversa (subestima a latência de quem abre a conversa); a comparação de custo entre as posições fica com a espera até a 1ª resposta.
 - Reconciliador simplificado e sob demanda: I3 não compara conteúdo (não vê a duplicata do E3b) e I1 só olha conversas com a IA; quem mede perda e duplicata é o juiz.

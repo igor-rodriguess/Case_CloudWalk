@@ -593,7 +593,7 @@ O gerador reenvia uma vez, com o mesmo `id_externo`, em erro ou timeout. O recon
 - Postgres sem réplica: falha de disco ou de banco não é testada;
 - sem autenticação (perfil escolhido na tela) e isolamento por marca só por filtro, sem RLS;
 - o gerador de carga (Python, no lugar do k6) roda na mesma máquina e disputa CPU com o sistema, então o E1 mede o conjunto;
-- carga medida a 50 msg/s, não a 100: a máquina saturou perto de 70 msg/s totais num teste com o código anterior às correções de desempenho (19.2); a meta de 100 msg/s fica sem evidência;
+- carga do experimento a 50 msg/s, não a 100 (19.2). Os testes de carga posteriores (`docs/testes-de-carga.md`) medem o joelho entre 60 e 80 msg/s totais numa máquina só, com o gerador dentro da rede do Docker. Os "~70 msg/s" de antes incluíam o limite do encaminhamento de porta do Windows. A meta de 100 msg/s fica sem evidência;
 - a linha da IA é travada a cada atribuição (seção 12): possível contenção por marca, hipótese não medida;
 - fila removida com conversa travada no instante da ativação: essa conversa só é re-roteada na ativação seguinte (seção 12); envelhecimento com `ENVELHECIMENTO_S` hipotético; nenhum dos dois com teste próprio;
 - p95 interna só na posição ligada e sem a 1ª mensagem de cada conversa (16);
