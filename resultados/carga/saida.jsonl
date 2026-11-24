@@ -1,0 +1,38 @@
+﻿
+{"teste": "T1 rampa", "execucao": "T1-1795483358", "inicio_epoch": 1795483360.6671157, "duracao_degrau_s": 150.0, 
+"drenagem_s": 336.6, "degraus": [{"msg_s_total_alvo": 40, "msg_s_cliente_oferecida": 20.0, "msg_s_cliente_aceita": 
+20.0, "post_p95_s": 0.11, "enviadas": 2000, "recusadas": 0, "perdidas": 0, "duplicadas": 0, "escaladas": 0, 
+"espera_p95_s": 1.88, "p95_interna_s": 0.147, "cpu_medio_pct": {}}, {"msg_s_total_alvo": 60, 
+"msg_s_cliente_oferecida": 30.0, "msg_s_cliente_aceita": 30.0, "post_p95_s": 0.19, "enviadas": 3000, "recusadas": 0, 
+"perdidas": 0, "duplicadas": 0, "escaladas": 0, "espera_p95_s": 3.025, "p95_interna_s": 0.539, "cpu_medio_pct": {}}, 
+{"msg_s_total_alvo": 80, "msg_s_cliente_oferecida": 40.0, "msg_s_cliente_aceita": 40.0, "post_p95_s": 1.782, 
+"enviadas": 4000, "recusadas": 0, "perdidas": 0, "duplicadas": 0, "escaladas": 0, "espera_p95_s": 42.546, 
+"p95_interna_s": 21.704, "cpu_medio_pct": {}}, {"msg_s_total_alvo": 100, "msg_s_cliente_oferecida": 50.0, 
+"msg_s_cliente_aceita": 50.0, "post_p95_s": 0.19, "enviadas": 5000, "recusadas": 0, "perdidas": 0, "duplicadas": 0, 
+"escaladas": 0, "espera_p95_s": 61.734, "p95_interna_s": 30.749, "cpu_medio_pct": {}}, {"msg_s_total_alvo": 120, 
+"msg_s_cliente_oferecida": 60.0, "msg_s_cliente_aceita": 60.0, "post_p95_s": 2.605, "enviadas": 6000, "recusadas": 0, 
+"perdidas": 0, "duplicadas": 0, "escaladas": 0, "espera_p95_s": 159.411, "p95_interna_s": 70.972, "cpu_medio_pct": 
+{}}, {"msg_s_total_alvo": 140, "msg_s_cliente_oferecida": 70.0, "msg_s_cliente_aceita": 70.0, "post_p95_s": 2.613, 
+"enviadas": 7000, "recusadas": 0, "perdidas": 0, "duplicadas": 0, "escaladas": 0, "espera_p95_s": 301.657, 
+"p95_interna_s": 128.673, "cpu_medio_pct": {}}, {"msg_s_total_alvo": 160, "msg_s_cliente_oferecida": 80.0, 
+"msg_s_cliente_aceita": 80.0, "post_p95_s": 2.702, "enviadas": 8000, "recusadas": 0, "perdidas": 0, "duplicadas": 0, 
+"escaladas": 0, "espera_p95_s": 399.623, "p95_interna_s": 189.427, "cpu_medio_pct": {}}, {"msg_s_total_alvo": 200, 
+"msg_s_cliente_oferecida": 100.0, "msg_s_cliente_aceita": 100.0, "post_p95_s": 2.731, "enviadas": 10000, "recusadas": 
+0, "perdidas": 0, "duplicadas": 0, "escaladas": 0, "espera_p95_s": 420.604, "p95_interna_s": 217.886, "cpu_medio_pct": 
+{}}]}
+{"teste": "T3 leitura do front", "execucao": "T3-1795485084", "clientes": 100, "duracao_s": 60.0, "fundo_msg_s_total": 
+50, "telas": {"/painel/fila?marca=infinitepay": {"requisicoes": 1185, "erros": 0, "p50_s": 0.69, "p95_s": 4.053, 
+"p99_s": 6.208}, "/conversas?estado=com_ia&limite=50": {"requisicoes": 1185, "erros": 1, "p50_s": 0.866, "p95_s": 
+3.892, "p99_s": 6.251}, "/supervisor/metricas": {"requisicoes": 1185, "erros": 0, "p50_s": 0.917, "p95_s": 4.222, 
+"p99_s": 6.693}, "/filas/ativa": {"requisicoes": 1185, "erros": 0, "p50_s": 0.608, "p95_s": 3.582, "p99_s": 6.058}}}
+{"teste": "T4-volume", "execucao": "T2-1795485209", "inicio_epoch": 1795485209.623993, "fim_epoch": 
+1795487661.9070482, "mensagens": 100000, "clientes": 20000, "envio_s": 1889.8, "vazao_entrada_msg_s": 52.9, 
+"post_p50_s": 0.68, "post_p95_s": 2.536, "post_p99_s": 3.905, "status_http": {"200": 100000}, "drenagem_s": 562.5, 
+"ate_ultima_resposta_s": 2452.3, "conversas": 20000, "conversas_sem_resposta": 0, "mensagens_sem_resposta_propria": 
+1581, "enviadas": 100000, "recusadas": 0, "perdidas": 1581, "duplicadas": 0, "escaladas": 0, "respondidas": 98419, 
+"espera_p95_s": 724.611, "p95_interna_s": 367.089, "cpu_medio_pct": {}}
+{"teste": "reconciliacao", "invariantes": {"I1_mensagem_sem_desfecho": 0, "I1b_esperando_humano": 0, 
+"I2_outbox_parada": 0, "I3_resposta_duplicada": 0, "I4_resposta_fora_de_dono": 0, "I5_capacidade": 0, 
+"I6_conversa_aberta_duplicada": 0}}
+
+

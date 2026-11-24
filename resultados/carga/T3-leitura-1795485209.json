@@ -1,0 +1,37 @@
+{
+  "teste": "T3 leitura do front",
+  "execucao": "T3-1795485084",
+  "clientes": 100,
+  "duracao_s": 60.0,
+  "fundo_msg_s_total": 50,
+  "telas": {
+    "/painel/fila?marca=infinitepay": {
+      "requisicoes": 1185,
+      "erros": 0,
+      "p50_s": 0.69,
+      "p95_s": 4.053,
+      "p99_s": 6.208
+    },
+    "/conversas?estado=com_ia&limite=50": {
+      "requisicoes": 1185,
+      "erros": 1,
+      "p50_s": 0.866,
+      "p95_s": 3.892,
+      "p99_s": 6.251
+    },
+    "/supervisor/metricas": {
+      "requisicoes": 1185,
+      "erros": 0,
+      "p50_s": 0.917,
+      "p95_s": 4.222,
+      "p99_s": 6.693
+    },
+    "/filas/ativa": {
+      "requisicoes": 1185,
+      "erros": 0,
+      "p50_s": 0.608,
+      "p95_s": 3.582,
+      "p99_s": 6.058
+    }
+  }
+}
