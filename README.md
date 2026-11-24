@@ -58,15 +58,31 @@ py -3.12 -m venv .venv
 .venv\Scripts\python testes\fumaca.py
 ```
 
-- `test_contrato.py` e `test_dominio.py`: 36 testes unitários (contrato, triagem, roteador, validação de regras, escolha do atendente).
-- `test_integracao.py`: 9 testes contra o Postgres do compose, num banco descartável que o próprio arquivo cria e apaga; roda sozinho, num comando à parte. Cobre concorrência em `transicionar`, transição inválida, fencing, capacidade sob concorrência, `SEM_CAPACIDADE` sem deixar a conversa sem dono, auditoria só de inserção, conversa aberta única, deduplicação na entrada e na API do agente, tipo de evento desconhecido.
+- `test_contrato.py` e `test_dominio.py`: 41 testes unitários (contrato, triagem, roteador, validação de regras, escolha do atendente, resposta do mock a cada mensagem pendente).
+- `test_integracao.py`: 10 testes contra o Postgres do compose, num banco descartável que o próprio arquivo cria e apaga; roda sozinho, num comando à parte. Cobre concorrência em `transicionar`, transição inválida, fencing, capacidade sob concorrência, `SEM_CAPACIDADE` sem deixar a conversa sem dono, auditoria só de inserção, conversa aberta única, deduplicação na entrada e na API do agente, tipo de evento desconhecido, fila da equipe filtrada antes do limite.
 - `fumaca.py`: 18 verificações em 7 cenários contra o ambiente no ar: caminho feliz, reenvio deduplicado, escala para humano com resumo, resposta do analista e devolução para a IA, só o dono responde, timeout com a resposta atrasada descartada pelo fencing, reconciliação (confere I3 a I6).
 
 O que o desenho previa e não tem teste automatizado está em `docs/implementacao.md`, seção 13, com o meio que cobre cada caso, quando há.
 
 ## Front-end
 
-A interface (chat simulado, acompanhamento, painel do analista, editor de filas) é feita pelo autor, fora deste repositório, consumindo a API do núcleo; o contrato que ela usa está em [`docs/api-front.md`](docs/api-front.md) e no OpenAPI em `/docs`. Sem autenticação: o perfil é escolhido na tela.
+A interface está em [`front/`](front/) (Next.js e TypeScript) e consome a API do núcleo pelo contrato de [`docs/api-front.md`](docs/api-front.md) e do OpenAPI em `/docs`. Sem autenticação: o perfil é escolhido na tela.
+
+| Tela | O que cobre do TAP |
+|---|---|
+| `/cliente` | Conversa do lojista com o atendente: marca, canal (chat, WhatsApp, e-mail), reenvio deduplicado |
+| `/analista` | Painel do analista: fila de escalas, resumo com as mensagens-fonte, histórico, perfil, auditoria; assumir, responder, devolver para a IA, encerrar |
+| `/filas` | Filas editáveis pela operação: editor, validar, simular, criar versão, ativar, rollback |
+| `/conversas` | Rastreabilidade: linha do tempo da auditoria com o porquê de cada decisão |
+| `/supervisor` | Métricas, ocupação, fila de erros da outbox, reconciliação I1 a I6 |
+
+```bash
+cd front
+npm install
+npm run dev        # http://localhost:3000
+```
+
+Testado no navegador contra o ambiente no ar, em 24/11/2026: envio, reenvio duplicado, escala por pedido do cliente, resposta do analista, devolução com nota, encerramento, validar, criar versão, ativar, rollback, simular e reconciliação. Não testados pela tela: "Assumir" (pede uma escala esperando na fila, com todos os analistas da equipe cheios) e "Reprocessar" da outbox (pede item em erro).
 
 A demonstração tem reserva sem o front: `carga/demo.py` percorre os 7 momentos do roteiro (`docs/arquitetura.md`, 19.4) contra o ambiente no ar, com pausa a cada momento:
 
