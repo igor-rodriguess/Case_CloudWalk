@@ -216,3 +216,26 @@ def test_evento_de_tipo_desconhecido_e_auditado_e_confirmado():
             "versao": "1.4", "id_evento": str(uuid.uuid4()), "tipo": "agente.novidade", "id_conversa": str(uuid.uuid4()),
             "marca": "jim", "timestamp": "2026-11-22T10:00:00Z", "dados": {}})
         assert r.status_code == 200 and r.json()["resultado"] == "tipo_desconhecido"
+
+
+def test_fila_da_equipe_filtra_antes_do_limite():
+    """Com 210 escalas de outra equipe na frente, a da equipe ainda aparece (o LIMIT é 200)."""
+    from fastapi.testclient import TestClient
+
+    from nucleo.main import app
+
+    def escala(fila: str, prioridade: int) -> uuid.UUID:
+        conv = nova_conversa("escalada")
+        sql("UPDATE conversas SET id_fila = %s, prioridade = %s WHERE id = %s", fila, prioridade, conv)
+        return conv
+
+    for _ in range(210):
+        escala("escalas-jim", 3)
+    da_equipe = escala("infinitepay-fraude", 1)
+    with TestClient(app) as cliente:
+        br = {x["id"] for x in cliente.get("/painel/fila", params={"equipe": "suporte-br"}).json()}
+        us = cliente.get("/painel/fila", params={"equipe": "support-us"}).json()
+        ninguem = cliente.get("/painel/fila", params={"equipe": "nao-existe"}).json()
+    assert str(da_equipe) in br
+    assert us and all(x["id_fila"] in ("escalas-jim", "jim-geral") for x in us)
+    assert ninguem == []

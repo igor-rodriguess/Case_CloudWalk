@@ -44,6 +44,17 @@ async def atendentes():
 @router.get("/fila", summary="Fila de escalas e conversas aguardando humano")
 async def fila(marca: str | None = None, equipe: str | None = None):
     async with Sessao() as s:
+        # A equipe filtra no SQL, antes do LIMIT: filtrar depois cortava a fila da equipe quando
+        # as 200 primeiras conversas eram de outras filas.
+        filas_da_equipe = None
+        if equipe:
+            regras = (await s.execute(text("SELECT filas FROM versoes_regras WHERE ativa"))).scalar()
+            filas_da_equipe = [
+                f["id"] for f in (regras or {}).get("filas", [])
+                if any(g["id"] == equipe for g in f["atendentes"])
+            ]
+            if not filas_da_equipe:
+                return []
         r = await s.execute(
             text(
                 """
@@ -59,20 +70,14 @@ async def fila(marca: str | None = None, equipe: str | None = None):
                     WHERE id_conversa = c.id ORDER BY criada_em DESC LIMIT 1) e ON true
                 WHERE c.estado IN ('escalada', 'na_fila')
                   AND (CAST(:marca AS text) IS NULL OR c.marca = :marca)
+                  AND (CAST(:filas AS text[]) IS NULL OR c.id_fila = ANY(CAST(:filas AS text[])))
                 ORDER BY c.estado = 'escalada' DESC, c.prioridade DESC NULLS LAST, c.na_fila_desde
                 LIMIT 200
                 """
             ),
-            {"marca": marca},
+            {"marca": marca, "filas": filas_da_equipe},
         )
-        linhas = [dict(x) for x in r.mappings().all()]
-        if equipe:
-            regras = (await s.execute(text("SELECT filas FROM versoes_regras WHERE ativa"))).scalar()
-            filas_da_equipe = {
-                f["id"] for f in regras["filas"] if any(g["id"] == equipe for g in f["atendentes"])
-            }
-            linhas = [x for x in linhas if x["id_fila"] in filas_da_equipe]
-        return linhas
+        return [dict(x) for x in r.mappings().all()]
 
 
 @router.get("/atendentes/{id_atendente}/conversas", summary="Conversas com o atendente")
