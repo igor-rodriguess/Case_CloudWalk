@@ -121,7 +121,10 @@ services:
   broker:
     image: helpdesk-app
     restart: on-failure
-    command: ["uvicorn", "broker.main:app", "--host", "0.0.0.0", "--port", "8100", "--no-access-log"]
+    # Dois processos: cada um tem o seu consumidor no grupo `broker-volta` (o Kafka divide as
+    # partições) e o sistema operacional divide os webhooks. Um só chegava a 100% de um núcleo
+    # a 50 msg/s do cliente (24/11).
+    command: ["uvicorn", "broker.main:app", "--host", "0.0.0.0", "--port", "8100", "--no-access-log", "--workers", "2"]
     ports:
       - "${BROKER_PORTA:-8100}:8100"
     environment:
