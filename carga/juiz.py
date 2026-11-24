@@ -13,6 +13,8 @@ from statistics import quantiles
 
 import psycopg
 
+from contrato import pendentes_do_cliente
+
 NUCLEO_DB = os.getenv("JUIZ_NUCLEO_DB", "postgresql://helpdesk:helpdesk@localhost:5433/helpdesk")
 CANAIS_DB = os.getenv("JUIZ_CANAIS_DB", "postgresql://helpdesk:helpdesk@localhost:5433/canais")
 
@@ -62,16 +64,22 @@ def julgar(registros, janela_ini: float, janela_fim: float, falha: dict | None =
         ).fetchall()
 
     externo_por_id = {id_msg: id_ext for _c, autor, _causa, _seq, id_ext, id_msg in msgs if autor == "cliente"}
-    externo_por_evento = {}               # id_evento enviado ao agente -> id_externo da mensagem
+    externo_por_evento = {}               # (id_evento enviado ao agente, sequencia) -> id_externo
     for id_evento, tipo, dados in enviados:
         dados = dados or {}
         if tipo == "mensagem.recebida":
-            id_msg = dados.get("id_mensagem")
+            ids = [dados.get("id_mensagem")]
         else:
-            do_cliente = [m for m in dados.get("historico", []) if m.get("autor") == "cliente"]
-            id_msg = do_cliente[-1]["id"] if do_cliente else None
-        if id_msg in externo_por_id:
-            externo_por_evento[id_evento] = externo_por_id[id_msg]
+            historico = dados.get("historico", [])
+            # Atribuição: a resposta de sequencia i é da i-ésima mensagem pendente (mesma regra
+            # do agente). Devolução, ou histórico sem pendente: a última mensagem do cliente.
+            pendentes = pendentes_do_cliente(historico) if tipo == "conversa.atribuida" else []
+            if not pendentes:
+                pendentes = [m for m in historico if m.get("autor") == "cliente"][-1:]
+            ids = [m["id"] for m in pendentes]
+        for i, id_msg in enumerate(ids):
+            if id_msg in externo_por_id:
+                externo_por_evento[(id_evento, i)] = externo_por_id[id_msg]
 
     clientes = defaultdict(list)          # conversa -> [(seq, id_externo)]
     ia_por_causa = {}                     # (conversa, causado_por) -> seq
@@ -86,15 +94,15 @@ def julgar(registros, janela_ini: float, janela_fim: float, falha: dict | None =
     contagem_regra = defaultdict(int)     # quantas respostas ligadas por cada regra
     respostas = defaultdict(list)         # id_externo -> [instantes]
     transferencias = defaultdict(list)    # conversa -> [instantes]
-    for conv, autor, causa, _seq, quando in entregas:
+    for conv, autor, causa, sequencia, quando in entregas:
         quando = float(quando)
         if autor == "sistema":
             transferencias[conv].append(quando)
             continue
         if autor != "ia":
             continue
-        if causa in externo_por_evento:
-            respostas[externo_por_evento[causa]].append(quando)
+        if (causa, sequencia or 0) in externo_por_evento:
+            respostas[externo_por_evento[(causa, sequencia or 0)]].append(quando)
             contagem_regra["exata"] += 1
             continue
         contagem_regra["por_ordem"] += 1
