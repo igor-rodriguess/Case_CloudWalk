@@ -1,0 +1,30 @@
+{
+  "teste": "T2 rajada",
+  "execucao": "T2-1795481952",
+  "inicio_epoch": 1795481953.035662,
+  "fim_epoch": 1795482917.3759873,
+  "mensagens": 20000,
+  "clientes": 5000,
+  "envio_s": 650.8,
+  "vazao_entrada_msg_s": 30.7,
+  "post_p50_s": 0.581,
+  "post_p95_s": 2.478,
+  "post_p99_s": 4.693,
+  "status_http": {
+    "200": 20000
+  },
+  "drenagem_s": 313.5,
+  "ate_ultima_resposta_s": 964.3,
+  "conversas": 5000,
+  "conversas_sem_resposta": 0,
+  "mensagens_sem_resposta_propria": 11099,
+  "enviadas": 20000,
+  "recusadas": 0,
+  "perdidas": 11099,
+  "duplicadas": 1,
+  "escaladas": 1,
+  "respondidas": 8898,
+  "espera_p95_s": 290.904,
+  "p95_interna_s": 24.682,
+  "cpu_medio_pct": {}
+}
