@@ -91,10 +91,14 @@ services:
       timeout: 3s
       retries: 30
 
-  # Laços de fundo do núcleo: relay da outbox, agendador e distribuidor.
+  # Laços de fundo do núcleo: relay da outbox, agendador e distribuidor. Dois processos: um só
+  # saturava um núcleo de CPU nos testes de carga e atrasava o relay além da reserva (30 s).
+  # Seguro em paralelo: todo trabalho é reservado com FOR UPDATE SKIP LOCKED.
   trabalhador:
     image: helpdesk-app
     restart: on-failure
+    deploy:
+      replicas: ${TRABALHADOR_REPLICAS:-2}
     command: ["python", "-m", "nucleo.trabalhador"]
     environment:
       <<: *ambiente_nucleo
