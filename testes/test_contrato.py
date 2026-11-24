@@ -128,3 +128,40 @@ class TestIdDerivado:
             id_derivado(uuid.uuid4(), "mensagem.enviada"),
         }
         assert len(ids) == 4
+
+
+class TestPendentesDoCliente:
+    def test_mensagens_depois_da_ultima_resposta(self):
+        from contrato import pendentes_do_cliente
+        h = [{"id": "1", "autor": "cliente"}, {"id": "2", "autor": "ia"},
+             {"id": "3", "autor": "cliente"}, {"id": "4", "autor": "cliente"}]
+        assert [m["id"] for m in pendentes_do_cliente(h)] == ["3", "4"]
+
+    def test_resposta_humana_tambem_fecha(self):
+        from contrato import pendentes_do_cliente
+        h = [{"id": "1", "autor": "cliente"}, {"id": "2", "autor": "humano"}]
+        assert pendentes_do_cliente(h) == []
+
+    def test_mensagem_de_sistema_nao_fecha(self):
+        from contrato import pendentes_do_cliente
+        h = [{"id": "1", "autor": "cliente"}, {"id": "2", "autor": "sistema"}, {"id": "3", "autor": "cliente"}]
+        assert [m["id"] for m in pendentes_do_cliente(h)] == ["1", "3"]
+
+
+class TestAgenteMockRespondeCadaMensagem:
+    def test_atribuicao_com_tres_pendentes_gera_tres_respostas_com_ids_proprios(self):
+        mock = pytest.importorskip("agente_mock.main")
+        historico = [{"id": str(i), "autor": "cliente", "conteudo": "oi"} for i in range(3)]
+        env = Envelope.model_validate(evento(tipo="conversa.atribuida", id_atribuicao=str(uuid.uuid4()),
+                                             dados={"historico": historico}))
+        saida = mock.decidir(env, trocas=mock.respostas_devidas(env))
+        enviadas = [e for e in saida if e["tipo"] == "mensagem.enviada"]
+        assert [e["dados"]["sequencia"] for e in enviadas] == [0, 1, 2]
+        assert len({e["id_evento"] for e in enviadas}) == 3
+        assert enviadas[0]["id_evento"] == str(id_derivado(env.id_evento, "mensagem.enviada", 0))
+
+    def test_mensagem_recebida_continua_com_uma_resposta(self):
+        mock = pytest.importorskip("agente_mock.main")
+        env = Envelope.model_validate(evento(id_atribuicao=str(uuid.uuid4())))
+        assert mock.respostas_devidas(env) == 1
+        assert len(mock.decidir(env, trocas=1)) == 1

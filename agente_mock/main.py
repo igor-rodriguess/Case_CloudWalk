@@ -20,7 +20,7 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from contrato import Envelope, id_derivado
+from contrato import Envelope, id_derivado, pendentes_do_cliente
 
 KAFKA = os.getenv("KAFKA_BOOTSTRAP", "localhost:19092")
 BANCO = os.getenv("MOCK_DATABASE_URL", "postgresql://helpdesk:helpdesk@localhost:5433/agente_mock")
@@ -87,7 +87,16 @@ def _texto_cliente(env: Envelope) -> tuple[str, str | None]:
     return do_cliente[-1].get("conteudo", ""), do_cliente[-1].get("id")
 
 
+def respostas_devidas(env: Envelope) -> int:
+    """Quantas mensagens o evento pede responder. Na atribuição, uma por mensagem do cliente
+    que chegou enquanto a conversa esperava na fila (todas vêm no histórico); senão, uma."""
+    if env.tipo == "conversa.atribuida":
+        return max(1, len(pendentes_do_cliente(env.dados.get("historico") or [])))
+    return 1
+
+
 def decidir(env: Envelope, trocas: int) -> list[dict]:
+    """`trocas` já conta as respostas deste evento: as frases saem das posições anteriores."""
     if env.tipo not in ("conversa.atribuida", "mensagem.recebida", "conversa.devolvida"):
         return []
     idioma = "en" if env.marca == "jim" else "pt"
@@ -101,8 +110,12 @@ def decidir(env: Envelope, trocas: int) -> list[dict]:
             "motivo": "cliente_irritado", "resumo": resumo, "prioridade_sugerida": 3,
             "fontes": [id_msg] if id_msg else [],
         })]
-    frase = RESPOSTAS[idioma][min(trocas - 1, len(RESPOSTAS[idioma]) - 1)]
-    saida = [_evento("mensagem.enviada", env, {"conteudo": frase, "sequencia": 0})]
+    frases = RESPOSTAS[idioma]
+    n = respostas_devidas(env)
+    saida = []
+    for i in range(n):  # sequencia i responde a i-ésima mensagem pendente (contrato.historico)
+        frase = frases[min(trocas - n + i, len(frases) - 1)]
+        saida.append(_evento("mensagem.enviada", env, {"conteudo": frase, "sequencia": i}, sequencia=i))
     if trocas >= MOCK_TROCAS:
         saida.append(_evento("conversa.resolvida", env, {"resumo": "Resolvido pelo agente."}))
     return saida
@@ -116,9 +129,9 @@ async def _tratar(conn, env: Envelope) -> None:
         if await cur.fetchone() is None:
             return  # repetido
         cur = await conn.execute(
-            "INSERT INTO trocas (id_conversa, n) VALUES (%s, 1) "
-            "ON CONFLICT (id_conversa) DO UPDATE SET n = trocas.n + 1 RETURNING n",
-            (env.id_conversa,),
+            "INSERT INTO trocas (id_conversa, n) VALUES (%s, %s) "
+            "ON CONFLICT (id_conversa) DO UPDATE SET n = trocas.n + EXCLUDED.n RETURNING n",
+            (env.id_conversa, respostas_devidas(env)),
         )
         trocas = (await cur.fetchone())[0]
         atraso = LATENCIA_MS / 1000
