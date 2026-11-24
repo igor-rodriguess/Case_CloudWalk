@@ -114,10 +114,16 @@ async def _permitida(s, de: str, para: str, ator_tipo: str) -> bool:
 
 
 async def _atendente_com_capacidade(s, id_atendente) -> dict | None:
-    """Trava a linha do atendente e confere a capacidade. A IA conta só como limite de custo."""
-    r = await s.execute(
-        text("SELECT * FROM atendentes WHERE id = :id FOR UPDATE"), {"id": id_atendente}
-    )
+    """Confere a capacidade. Humano: trava a linha (a capacidade dele é real, 3 conversas).
+
+    IA: lê sem travar. Ela é uma linha por marca, e travá-la a cada atribuição serializava todas
+    as conversas novas da marca (testes de carga, 23/11). Na entrega a IA não tem limite (o limite
+    por custo é Evolução), então a leitura sem trava não deixa passar nada que devia ser barrado.
+    """
+    r = await s.execute(text("SELECT tipo FROM atendentes WHERE id = :id"), {"id": id_atendente})
+    tipo = r.scalar()
+    trava = "" if tipo == "ia" else " FOR UPDATE"
+    r = await s.execute(text(f"SELECT * FROM atendentes WHERE id = :id{trava}"), {"id": id_atendente})
     a = r.mappings().first()
     if a is None or a["status"] != "disponivel" or a["ativas"] >= a["capacidade"]:
         return None
@@ -196,9 +202,12 @@ async def transicionar(
                 ),
                 {"id": nova, "c": c["id"], "f": id_fila or c["id_fila"], "a": novo_dono["id"]},
             )
-            await s.execute(
-                text("UPDATE atendentes SET ativas = ativas + 1 WHERE id = :id"), {"id": novo_dono["id"]}
-            )
+            if novo_dono["tipo"] != "ia":
+                await s.execute(
+                    text("UPDATE atendentes SET ativas = ativas + 1 WHERE id = :id"), {"id": novo_dono["id"]}
+                )
+            else:
+                s.info["incrementar_ia"] = novo_dono["id"]  # no fim, para segurar a linha o mínimo
             mudancas.update(id_atribuicao_atual=nova, id_atendente=novo_dono["id"])
         if para == "escalada":
             mudancas["origem"] = "escalado"
@@ -268,4 +277,7 @@ async def transicionar(
         s, "transicao" if para else "mensagem", ator, c["id"], c["id_atribuicao_atual"],
         para=para, motivo=motivo, saidas=[x.tipo for x in lista],
     )
+    ia = s.info.pop("incrementar_ia", None)
+    if ia is not None:  # última escrita da transação: a linha da IA fica travada só até o commit
+        await s.execute(text("UPDATE atendentes SET ativas = ativas + 1 WHERE id = :id"), {"id": ia})
     return Resultado.APLICADO, c
