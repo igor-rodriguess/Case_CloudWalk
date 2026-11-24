@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nucleo import config
 from nucleo.dominio.roteador import rotear
+from nucleo.dominio.sla import limite_da_fila
 from nucleo.dominio.transicionar import (
     SISTEMA,
     Ator,
@@ -20,6 +21,42 @@ MSG_TRANSFERENCIA = {
     "pt": "Vou te transferir para um especialista. Ele já recebe todo o histórico da conversa.",
     "en": "I'm transferring you to a specialist, who will see the full conversation history.",
 }
+MSG_ESPERA = {
+    "pt": {0: "Um especialista já vai te atender.", 1: "Tempo estimado de espera: cerca de {m} min."},
+    "en": {0: "A specialist will be with you shortly.", 1: "Estimated wait: about {m} min."},
+}
+
+
+async def estimar_espera(s: AsyncSession, marca: str) -> int:
+    """Segundos até um analista da marca pegar uma nova escala.
+
+    Vagas livres agora (capacidade menos conversas) atendem na hora. Sem vaga, a escala espera a
+    vez: (escalas na frente - vagas + 1) / capacidade total, em rodadas do tempo médio de
+    atendimento humano das últimas 24 h da marca; sem histórico, `ATENDIMENTO_HUMANO_S`
+    (hipótese). É uma estimativa, não uma promessa: o texto ao cliente diz "cerca de".
+    """
+    r = await s.execute(text(
+        "SELECT coalesce(sum(capacidade), 0), coalesce(sum(greatest(capacidade - ativas, 0)), 0) "
+        "FROM atendentes WHERE tipo = 'humano' AND marca = :m AND status = 'disponivel'"), {"m": marca})
+    capacidade, livres = r.one()
+    frente = (await s.execute(text(
+        "SELECT count(*) FROM conversas WHERE marca = :m AND estado = 'escalada'"), {"m": marca})).scalar()
+    if livres > frente:
+        return 0
+    media = (await s.execute(text(
+        "SELECT avg(extract(epoch FROM t.fim - t.inicio)) FROM atribuicoes t "
+        "JOIN atendentes a ON a.id = t.id_atendente JOIN conversas c ON c.id = t.id_conversa "
+        "WHERE a.tipo = 'humano' AND c.marca = :m AND t.fim > now() - interval '24 hours'"), {"m": marca})).scalar()
+    media = float(media) if media else config.ATENDIMENTO_HUMANO_S
+    rodadas = -(-(frente - livres + 1) // max(int(capacidade), 1))
+    return int(rodadas * media)
+
+
+def texto_espera(idioma: str, segundos: int) -> str:
+    textos = MSG_ESPERA.get(idioma or "pt", MSG_ESPERA["pt"])
+    if segundos <= 0:
+        return textos[0]
+    return textos[1].format(m=max(1, round(segundos / 60)))
 
 
 async def regras_ativas(s: AsyncSession) -> tuple[dict, int]:
@@ -45,11 +82,13 @@ async def rotear_conversa(s: AsyncSession, c: dict, ator: Ator = SISTEMA) -> str
     regras, versao = await regras_ativas(s)
     atendimento = await atendimento_de(s, c)
     decisao = rotear(atendimento, regras, versao)
+    fila = next((f for f in regras["filas"] if f["id"] == decisao.fila), None)
+    limite = limite_da_fila(fila, c.get("prioridade"))
     await s.execute(
-        text("UPDATE conversas SET id_fila = :f, versao_regras = :v WHERE id = :id"),
-        {"f": decisao.fila, "v": versao, "id": c["id"]},
+        text("UPDATE conversas SET id_fila = :f, versao_regras = :v, sla_limite_s = :l WHERE id = :id"),
+        {"f": decisao.fila, "v": versao, "l": limite, "id": c["id"]},
     )
-    c["id_fila"], c["versao_regras"] = decisao.fila, versao
+    c["id_fila"], c["versao_regras"], c["sla_limite_s"] = decisao.fila, versao, limite
     await auditar(s, "decisao_roteamento", ator, c["id"], atendimento=atendimento,
                   versao=versao, fila=decisao.fila, regra=decisao.regra)
     return decisao.fila
@@ -144,14 +183,19 @@ async def escalar(
     prioridade_sugerida: int | None = None,
     causado_por=None,
 ) -> Resultado:
-    """com_ia -> escalada, volta ao roteador com origem = escalado e avisa o cliente.
+    """com_ia ou na_fila -> escalada, volta ao roteador com origem = escalado e avisa o cliente,
+    com o tempo estimado de espera (`estimar_espera`), gravado também na escala.
 
     A mensagem de transferência leva `causado_por` = evento que escalou, para o juiz do
     experimento contar a escala na ponta (o cliente vê "vou te transferir").
     """
 
+    espera: dict = {}
+
     async def aviso(s2, c):
-        texto = MSG_TRANSFERENCIA.get(c["idioma"] or "pt")
+        espera["s"] = await estimar_espera(s2, c["marca"])
+        idioma = c["idioma"] or "pt"
+        texto = f"{MSG_TRANSFERENCIA.get(idioma)} {texto_espera(idioma, espera['s'])}"
         return [para_canal(c, "sistema", texto, causado_por=causado_por)]
 
     resultado, c = await transicionar(
@@ -169,11 +213,11 @@ async def escalar(
         c["prioridade"] = prioridade_sugerida
     await s.execute(
         text(
-            "INSERT INTO escalas (id_conversa, motivo, resumo, fontes, reserva, prioridade) "
-            "VALUES (:c, :m, :r, CAST(:f AS jsonb), :res, :p)"
+            "INSERT INTO escalas (id_conversa, motivo, resumo, fontes, reserva, prioridade, tempo_estimado_s) "
+            "VALUES (:c, :m, :r, CAST(:f AS jsonb), :res, :p, :eta)"
         ),
         {"c": c["id"], "m": motivo, "r": resumo, "f": json.dumps(fontes or []), "res": reserva,
-         "p": c["prioridade"]},
+         "p": c["prioridade"], "eta": espera.get("s")},
     )
     await rotear_conversa(s, c, ator)
     return resultado

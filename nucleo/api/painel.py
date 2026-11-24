@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from nucleo.dominio.acoes import contexto_para_ia
 from nucleo.dominio.transicionar import Ator, Resultado, novo_evento, para_canal, transicionar
-from nucleo.infra.banco import Sessao, unidade
+from nucleo.infra.banco import Sessao, escopo_marca, unidade
 
 router = APIRouter(prefix="/painel", tags=["painel do analista"])
 
@@ -36,7 +36,8 @@ def _checar(resultado: Resultado) -> dict:
 async def atendentes():
     async with Sessao() as s:
         r = await s.execute(
-            text("SELECT id, tipo, nome, marca, id_equipe, capacidade, ativas, status FROM atendentes ORDER BY tipo, nome")
+            text("SELECT a.id, a.tipo, a.nome, a.marca, a.id_equipe, a.capacidade, CASE WHEN a.tipo = 'ia' THEN (SELECT count(*) FROM conversas c WHERE c.id_atendente = a.id AND c.estado = 'com_ia') ELSE a.ativas END AS ativas, a.status "
+                 "FROM atendentes a ORDER BY a.tipo, a.nome")
         )
         return [dict(a) for a in r.mappings().all()]
 
@@ -47,6 +48,7 @@ async def fila(marca: str | None = None, equipe: str | None = None):
         # A equipe filtra no SQL, antes do LIMIT: filtrar depois cortava a fila da equipe quando
         # as 200 primeiras conversas eram de outras filas.
         filas_da_equipe = None
+        await escopo_marca(s, marca)
         if equipe:
             regras = (await s.execute(text("SELECT filas FROM versoes_regras WHERE ativa"))).scalar()
             filas_da_equipe = [
@@ -163,3 +165,21 @@ async def encerrar(id_conversa: uuid.UUID, corpo: Analista):
             s, id_conversa, "resolvida", Ator("humano", corpo.id_atendente), motivo="resolvida"
         )
     return _checar(resultado)
+
+
+class Ouvidoria(BaseModel):
+    ouvidoria: bool = True
+
+
+@router.post("/conversas/{id_conversa}/ouvidoria", summary="Marca a conversa como caso de ouvidoria")
+async def marcar_ouvidoria(id_conversa: uuid.UUID, corpo: Ouvidoria):
+    """Conversa de ouvidoria fica fora do expurgo por retenção."""
+    from nucleo.dominio.transicionar import auditar
+
+    async with unidade() as s:
+        r = await s.execute(text("UPDATE conversas SET ouvidoria = :o WHERE id = :id RETURNING id"),
+                            {"o": corpo.ouvidoria, "id": id_conversa})
+        if r.first() is None:
+            raise HTTPException(404, "conversa não existe")
+        await auditar(s, "ouvidoria", Ator("humano"), id_conversa, ouvidoria=corpo.ouvidoria)
+    return {"ouvidoria": corpo.ouvidoria}

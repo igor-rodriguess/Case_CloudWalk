@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
 
 from nucleo import config
-from nucleo.infra.banco import Sessao
+from nucleo.infra.banco import Sessao, unidade
 from nucleo.infra.relay import reprocessar
 from nucleo.reconciliacao import reconciliar
 
@@ -27,7 +27,8 @@ async def metricas():
         )
         outbox = await s.execute(text("SELECT status, count(*) FROM outbox GROUP BY status"))
         atendentes = await s.execute(
-            text("SELECT nome, tipo, marca, id_equipe, ativas, capacidade, status FROM atendentes ORDER BY tipo, nome")
+            text("SELECT a.id, a.nome, a.tipo, a.marca, a.id_equipe, CASE WHEN a.tipo = 'ia' THEN (SELECT count(*) FROM conversas c WHERE c.id_atendente = a.id AND c.estado = 'com_ia') ELSE a.ativas END AS ativas, a.capacidade, a.status "
+            "FROM atendentes a ORDER BY a.tipo, a.nome")
         )
         fencing = await s.execute(
             text("SELECT count(*) FROM eventos WHERE tipo = 'evento_descartado' AND criado_em > now() - interval '1 hour'")
@@ -36,6 +37,14 @@ async def metricas():
             text(
                 "SELECT count(*) FILTER (WHERE origem = 'cliente') AS pela_ia, count(*) AS total "
                 "FROM conversas WHERE estado = 'resolvida' AND resolvida_em > now() - interval '1 hour'"
+            )
+        )
+        sla = await s.execute(
+            text(
+                "SELECT count(*) FILTER (WHERE sla_desde IS NOT NULL) AS correndo, "
+                "count(*) FILTER (WHERE sla_limite_s IS NOT NULL AND sla_acumulado_ms "
+                "+ coalesce(extract(epoch FROM now() - sla_desde) * 1000, 0) > sla_limite_s * 1000) AS estourados "
+                "FROM conversas WHERE estado <> 'resolvida'"
             )
         )
         res = resolvidas.mappings().first()
@@ -47,6 +56,7 @@ async def metricas():
             "atendentes": [dict(x) for x in atendentes.mappings().all()],
             "descartes_fencing_ultima_hora": fencing.scalar(),
             "resolvidas_ultima_hora": dict(res),
+            "sla": dict(sla.mappings().first()),
             "chaves": config.chaves(),
         }
 
@@ -76,3 +86,40 @@ async def reconciliacao():
 @router.get("/config", summary="Chaves de ablação e prazos em uso")
 async def configuracao():
     return config.chaves()
+
+
+EXPURGO = """
+WITH alvo AS (
+    SELECT id FROM conversas
+    WHERE estado = 'resolvida' AND NOT ouvidoria
+      AND resolvida_em < now() - make_interval(days => :dias)
+), msgs AS (
+    UPDATE mensagens SET conteudo = '[expurgado]', expurgada_em = now()
+    WHERE id_conversa IN (SELECT id FROM alvo) AND expurgada_em IS NULL
+    RETURNING id
+), saidas AS (
+    UPDATE outbox SET payload = jsonb_build_object('expurgado', true)
+    WHERE id_conversa IN (SELECT id FROM alvo) AND status = 'enviado' AND NOT payload ? 'expurgado'
+    RETURNING id
+), notas AS (
+    UPDATE escalas SET resumo = '[expurgado]', fontes = '[]'
+    WHERE id_conversa IN (SELECT id FROM alvo) AND resumo <> '[expurgado]'
+    RETURNING id
+)
+SELECT (SELECT count(*) FROM alvo), (SELECT count(*) FROM msgs), (SELECT count(*) FROM saidas),
+       (SELECT count(*) FROM notas)
+"""
+
+
+@router.post("/supervisor/expurgo", summary="Apaga os corpos vencidos pela retenção, menos ouvidoria")
+async def expurgo(dias: int = config.RETENCAO_DIAS):
+    """Apaga o texto de mensagens, payloads enviados da outbox e notas de escala de conversas
+    resolvidas há mais de `dias`. As linhas ficam (contagem, ordem e auditoria continuam); só o
+    corpo sai. Conversa marcada como ouvidoria é preservada. A trilha de eventos não guarda corpo
+    de mensagem e é só de inserção."""
+    if dias < 0:
+        raise HTTPException(422, "dias deve ser >= 0")
+    async with unidade() as s:
+        conversas, mensagens, saidas, notas = (await s.execute(text(EXPURGO), {"dias": dias})).one()
+    return {"conversas": conversas, "mensagens": mensagens, "outbox": saidas, "notas_de_escala": notas,
+            "retencao_dias": dias}

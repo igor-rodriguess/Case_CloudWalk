@@ -22,6 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nucleo import config
+from nucleo.dominio import sla
 
 
 class Resultado(str, Enum):
@@ -116,9 +117,11 @@ async def _permitida(s, de: str, para: str, ator_tipo: str) -> bool:
 async def _atendente_com_capacidade(s, id_atendente) -> dict | None:
     """Confere a capacidade. Humano: trava a linha (a capacidade dele é real, 3 conversas).
 
-    IA: lê sem travar. Ela é uma linha por marca, e travá-la a cada atribuição serializava todas
-    as conversas novas da marca (testes de carga, 23/11). Na entrega a IA não tem limite (o limite
-    por custo é Evolução), então a leitura sem trava não deixa passar nada que devia ser barrado.
+    IA: lê sem travar e não mantém o contador `ativas`. Ela é uma linha por marca: travá-la a cada
+    atribuição (23/11) e depois só o incremento no fim da transação (24/11) ainda serializavam todas
+    as atribuições e liberações da marca até o COMMIT, e o distribuidor não passava de ~18
+    conversas/s. Na entrega a IA não tem limite (o limite por custo é Evolução); a ocupação da IA é
+    contada na leitura (painel e supervisor).
     """
     r = await s.execute(text("SELECT tipo FROM atendentes WHERE id = :id"), {"id": id_atendente})
     tipo = r.scalar()
@@ -146,9 +149,9 @@ async def encerrar_atribuicao(s, c: dict, motivo: str | None) -> None:
         ),
         {"a": c["id_atribuicao_atual"]},
     )
-    if linha:
+    if linha:  # a IA não mantém contador (ver _atendente_com_capacidade)
         await s.execute(
-            text("UPDATE atendentes SET ativas = greatest(ativas - 1, 0) WHERE id = :id"),
+            text("UPDATE atendentes SET ativas = greatest(ativas - 1, 0) WHERE id = :id AND tipo <> 'ia'"),
             {"id": linha[0]},
         )
 
@@ -206,8 +209,6 @@ async def transicionar(
                 await s.execute(
                     text("UPDATE atendentes SET ativas = ativas + 1 WHERE id = :id"), {"id": novo_dono["id"]}
                 )
-            else:
-                s.info["incrementar_ia"] = novo_dono["id"]  # no fim, para segurar a linha o mínimo
             mudancas.update(id_atribuicao_atual=nova, id_atendente=novo_dono["id"])
         if para == "escalada":
             mudancas["origem"] = "escalado"
@@ -220,6 +221,20 @@ async def transicionar(
         mudancas["versao"] = c["versao"] + 1
 
     c.update(mudancas)
+
+    agora = datetime.now(timezone.utc)
+    if mensagem is not None or para == "resolvida":
+        # SLA: corre enquanto a operação deve resposta (mensagem do cliente), pausa quando um
+        # atendente responde ou a conversa fecha (nucleo/dominio/sla.py).
+        acumulado, desde = c.get("sla_acumulado_ms") or 0, c.get("sla_desde")
+        autor = (mensagem or {}).get("autor_tipo")
+        if autor == "cliente":
+            acumulado, desde = sla.retomar(acumulado, desde, agora)
+        elif autor in ("ia", "humano") or para == "resolvida":
+            acumulado, desde = sla.pausar(acumulado, desde, agora)
+        if (acumulado, desde) != (c.get("sla_acumulado_ms") or 0, c.get("sla_desde")):
+            mudancas.update(sla_acumulado_ms=acumulado, sla_desde=desde)
+            c.update(sla_acumulado_ms=acumulado, sla_desde=desde)
 
     if mensagem is not None:
         c["seq_mensagem"] = c["seq_mensagem"] + 1
@@ -277,7 +292,4 @@ async def transicionar(
         s, "transicao" if para else "mensagem", ator, c["id"], c["id_atribuicao_atual"],
         para=para, motivo=motivo, saidas=[x.tipo for x in lista],
     )
-    ia = s.info.pop("incrementar_ia", None)
-    if ia is not None:  # última escrita da transação: a linha da IA fica travada só até o commit
-        await s.execute(text("UPDATE atendentes SET ativas = ativas + 1 WHERE id = :id"), {"id": ia})
     return Resultado.APLICADO, c

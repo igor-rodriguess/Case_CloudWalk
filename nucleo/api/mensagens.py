@@ -106,7 +106,8 @@ async def _processar(s, m: MensagemEntrada, id_externo: str) -> MensagemAceita:
         return [novo_evento("mensagem.recebida", c, dados)]
 
     resultado, c = await transicionar(s, id_conversa, None, ator, mensagem=mensagem, saidas=saidas)
-    if resultado == Resultado.APLICADO and c["estado"] == "com_ia" and pede_humano(m.conteudo):
+    # Pedido de atendente vale em qualquer turno antes do humano: com a IA ou ainda na fila.
+    if resultado == Resultado.APLICADO and c["estado"] in ("com_ia", "na_fila") and pede_humano(m.conteudo):
         await escalar(s, id_conversa, ator, "pedido_do_cliente", id_atribuicao=c["id_atribuicao_atual"],
                       causado_por=chave_entrada(m.canal, id_externo))
         c["estado"] = "escalada"

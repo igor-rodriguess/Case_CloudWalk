@@ -36,3 +36,14 @@ async def unidade():
 
 async def executar(s: AsyncSession, sql: str, **params):
     return await s.execute(text(sql), params)
+
+
+async def escopo_marca(s, marca: str | None) -> None:
+    """Leitura em nome de uma marca: troca para o papel `leitura_marca` e fixa `app.marca` só nesta
+    transação (migration 0006). A partir daqui o Postgres esconde as linhas da outra marca."""
+    if marca is None:
+        return
+    from sqlalchemy import text
+
+    await s.execute(text("SET LOCAL ROLE leitura_marca"))
+    await s.execute(text("SELECT set_config('app.marca', :m, true)"), {"m": marca})

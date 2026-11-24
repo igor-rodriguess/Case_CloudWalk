@@ -44,6 +44,9 @@ INVARIANTES = {
         WHERE a.tipo = 'humano' AND (a.ativas > a.capacidade OR a.ativas <>
               (SELECT count(*) FROM atribuicoes t WHERE t.id_atendente = a.id AND t.fim IS NULL))
     """,
+    "I7_escala_sem_nota": """
+        SELECT e.id FROM escalas e WHERE coalesce(trim(e.resumo), '') = ''
+    """,
     "I6_conversa_aberta_duplicada": """
         SELECT id_cliente::text || ':' || marca FROM conversas WHERE estado <> 'resolvida'
         GROUP BY id_cliente, marca HAVING count(*) > 1

@@ -17,6 +17,11 @@ ATENDENTES = [
     ("humano", "Evan Brooks", "jim", "support-us"),
 ]
 
+# SLA de resposta nas filas de escalas, por prioridade. Valores de hipótese (sem fonte): servem
+# para o relógio e o painel, não foram calibrados com a operação.
+SLAS_ESCALAS = [{"prioridade": 3, "limite_s": 300}, {"prioridade": 2, "limite_s": 900},
+                {"prioridade": 1, "limite_s": 1800}]
+
 FILAS_V1 = {
     "fila_padrao": "padrao",
     "filas": [
@@ -24,12 +29,13 @@ FILAS_V1 = {
          "ativa": True, "ao_abrir_disjuntor": "reter",
          "condicoes": {"todas": [{"campo": "origem", "operador": "igual", "valor": "escalado"},
                                  {"campo": "marca", "operador": "igual", "valor": "infinitepay"}]},
-         "atendentes": [{"tipo": "equipe", "id": "suporte-br"}, {"tipo": "equipe", "id": "credito-br"}]},
+         "atendentes": [{"tipo": "equipe", "id": "suporte-br"}, {"tipo": "equipe", "id": "credito-br"}],
+         "slas": SLAS_ESCALAS},
         {"id": "escalas-jim", "nome": "JIM - Escalations", "ordem": 2, "prioridade": 3, "ativa": True,
          "ao_abrir_disjuntor": "reter",
          "condicoes": {"todas": [{"campo": "origem", "operador": "igual", "valor": "escalado"},
                                  {"campo": "marca", "operador": "igual", "valor": "jim"}]},
-         "atendentes": [{"tipo": "equipe", "id": "support-us"}]},
+         "atendentes": [{"tipo": "equipe", "id": "support-us"}], "slas": SLAS_ESCALAS},
         {"id": "infinitepay-fraude", "nome": "InfinitePay - Fraude (só humanos)", "ordem": 3,
          "prioridade": 3, "ativa": True, "ao_abrir_disjuntor": "transbordar",
          "condicoes": {"todas": [{"campo": "marca", "operador": "igual", "valor": "infinitepay"},
