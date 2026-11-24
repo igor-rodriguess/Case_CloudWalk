@@ -136,7 +136,9 @@ async def t1_rampa(degraus=(40, 60, 80, 100, 120, 140, 160, 200), duracao=150.0,
 
 
 # ---------------------------------------------------------------- T2 rajada
-async def t2_rajada(n=20_000, clientes=5_000, nome="T2-rajada") -> dict:
+async def t2_rajada(n=20_000, clientes=5_000, nome="T2-rajada", taxa: float | None = None) -> dict:
+    """Sem `taxa`, envia o mais rápido possível. Com `taxa` (msg/s do cliente), a mensagem i sai
+    no instante i / taxa; as de um mesmo cliente ficam `clientes / taxa` segundos uma da outra."""
     preparar("E1", "ligada")
     execucao = f"T2-{int(time.time())}"
     rnd = random.Random(7)
@@ -147,14 +149,14 @@ async def t2_rajada(n=20_000, clientes=5_000, nome="T2-rajada") -> dict:
         cliente, k = i % clientes, i // clientes
         marca = "jim" if cliente % 5 == 0 else "infinitepay"
         texto = rnd.choice(TEXTOS_EN if marca == "jim" else TEXTOS_PT)
-        agenda.append(Envio(0.0, f"{execucao}-c{cliente}", k, f"{execucao}-c{cliente}-m{k}", marca, "chat", texto))
+        agenda.append(Envio(i / taxa if taxa else 0.0, f"{execucao}-c{cliente}", k, f"{execucao}-c{cliente}-m{k}", marca, "chat", texto))
     with AmostradorDocker() as docker:
         t0 = time.time()
         registros = await reproduzir(agenda, NUCLEO, t0)
         t_envio = time.time() - t0
         drenagem = esperar_drenar(1200)
         t_fim = time.time()
-    m, linhas = julgar(registros, -1, 1)
+    m, linhas = julgar(registros, -1, float("inf"))  # todas; o envio cadenciado vai até n / taxa
     # Mensagens quase simultâneas do mesmo cliente podem ser respondidas juntas (o agente recebe o
     # histórico). A perda que importa é a da conversa: a última mensagem de cada cliente sem resposta.
     ultima = {}
@@ -169,7 +171,7 @@ async def t2_rajada(n=20_000, clientes=5_000, nome="T2-rajada") -> dict:
         status[str(r.status)] += 1
     resultado = {
         "teste": nome, "execucao": execucao, "inicio_epoch": t0, "fim_epoch": t_fim,
-        "mensagens": n, "clientes": clientes,
+        "mensagens": n, "clientes": clientes, "taxa_oferecida_msg_s": taxa,
         "envio_s": round(t_envio, 1), "vazao_entrada_msg_s": round(n / t_envio, 1),
         "post_p50_s": pct([r.latencia_req_s for r in registros if r.status], 50),
         "post_p95_s": pct([r.latencia_req_s for r in registros if r.status], 95),
@@ -242,6 +244,7 @@ def main() -> None:
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     p = argparse.ArgumentParser()
     p.add_argument("--so", nargs="*", default=["T1", "T2", "T3", "R"])
+    p.add_argument("--taxa", type=float, default=25.0, help="msg/s do cliente no T4c")
     a = p.parse_args()
     if "T1" in a.so:
         print(json.dumps(asyncio.run(t1_rampa()), ensure_ascii=False), flush=True)
@@ -252,6 +255,9 @@ def main() -> None:
     if "T4" in a.so:  # volume: 100 mil mensagens de 20 mil clientes
         print(json.dumps(asyncio.run(t2_rajada(n=100_000, clientes=20_000, nome="T4-volume")),
                          ensure_ascii=False), flush=True)
+    if "T4c" in a.so:  # o mesmo volume em cadência sustentável (a carga do experimento, 50 msg/s totais)
+        print(json.dumps(asyncio.run(t2_rajada(n=100_000, clientes=20_000, nome="T4c-volume-cadenciado",
+                                               taxa=a.taxa)), ensure_ascii=False), flush=True)
     if "R" in a.so:
         print(json.dumps(reconciliacao(), ensure_ascii=False), flush=True)
 
