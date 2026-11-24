@@ -1,0 +1,30 @@
+{
+  "teste": "T4-volume",
+  "execucao": "T2-1795489901",
+  "inicio_epoch": 1795489901.7412632,
+  "fim_epoch": 1795492328.1202564,
+  "mensagens": 100000,
+  "clientes": 20000,
+  "envio_s": 1831.8,
+  "vazao_entrada_msg_s": 54.6,
+  "post_p50_s": 0.628,
+  "post_p95_s": 2.569,
+  "post_p99_s": 4.196,
+  "status_http": {
+    "200": 100000
+  },
+  "drenagem_s": 594.5,
+  "ate_ultima_resposta_s": 2426.4,
+  "conversas": 20000,
+  "conversas_sem_resposta": 10181,
+  "mensagens_sem_resposta_propria": 19851,
+  "enviadas": 100000,
+  "recusadas": 0,
+  "perdidas": 19851,
+  "duplicadas": 0,
+  "escaladas": 29554,
+  "respondidas": 49699,
+  "espera_p95_s": 1225.136,
+  "p95_interna_s": 473.217,
+  "cpu_medio_pct": {}
+}

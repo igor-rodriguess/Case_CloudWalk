@@ -1,0 +1,14 @@
+﻿
+ Container helpdesk-nucleo-run-f72d0cd7d0d4 Creating 
+ Container helpdesk-nucleo-run-f72d0cd7d0d4 Created 
+{"teste": "T4c-volume-cadenciado", "execucao": "T2-1795523127", "inicio_epoch": 1795523128.343671, "fim_epoch": 
+1795527151.690069, "mensagens": 100000, "clientes": 20000, "taxa_oferecida_msg_s": 25.0, "envio_s": 4000.9, 
+"vazao_entrada_msg_s": 25.0, "post_p50_s": 0.066, "post_p95_s": 0.163, "post_p99_s": 0.339, "status_http": {"200": 
+100000}, "drenagem_s": 22.4, "ate_ultima_resposta_s": 4023.3, "conversas": 25, "conversas_sem_resposta": 0, 
+"mensagens_sem_resposta_propria": 0, "enviadas": 25, "recusadas": 0, "perdidas": 0, "duplicadas": 0, "escaladas": 0, 
+"respondidas": 25, "espera_p95_s": 2.404, "p95_interna_s": 32.818, "cpu_medio_pct": {}}
+{"teste": "reconciliacao", "invariantes": {"I1_mensagem_sem_desfecho": 0, "I1b_esperando_humano": 0, 
+"I2_outbox_parada": 0, "I3_resposta_duplicada": 0, "I4_resposta_fora_de_dono": 0, "I5_capacidade": 0, 
+"I6_conversa_aberta_duplicada": 0}}
+
+

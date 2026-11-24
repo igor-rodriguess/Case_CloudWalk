@@ -1,0 +1,23 @@
+{
+  "teste": "T4c-volume-cadenciado (rejulgado do banco)",
+  "execucao": "T2-1795523127",
+  "mensagens": 100000,
+  "conversas": 20000,
+  "conversas_sem_resposta": 0,
+  "mensagens_sem_resposta_propria": 0,
+  "enviadas": 100000,
+  "recusadas": 0,
+  "perdidas": 0,
+  "duplicadas": 0,
+  "escaladas": 0,
+  "respondidas": 100000,
+  "espera_p95_s": 90.561,
+  "p95_interna_s": 32.818,
+  "respostas_ligadas_exata": 100000,
+  "respostas_ligadas_por_ordem": 0,
+  "espera_p50_s": 1.109,
+  "espera_p99_s": 186.21,
+  "desfechos": {
+    "respondida": 100000
+  }
+}
