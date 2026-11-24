@@ -86,3 +86,9 @@ async def grupos_existentes(s) -> set[tuple[str, str]]:
     for tipo, equipe in r.all():
         grupos.add(("ia" if tipo == "ia" else "equipe", equipe))
     return grupos
+
+
+async def grupos_elegiveis(s) -> set[tuple[str, str]]:
+    """Grupos com pelo menos um atendente que pode receber conversa (capacidade > 0)."""
+    r = await s.execute(text("SELECT DISTINCT tipo, id_equipe FROM atendentes WHERE capacidade > 0"))
+    return {("ia" if tipo == "ia" else "equipe", equipe) for tipo, equipe in r.all()}

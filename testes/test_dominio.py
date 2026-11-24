@@ -85,6 +85,46 @@ class TestValidacao:
         for trecho in ("repetidos", "ordem repetida", "fila_padrao", "prioridade", "fantasma", "JIM", "cor"):
             assert trecho in erros
 
+    def _regras(self, *filas):
+        base = {"prioridade": 1, "atendentes": [{"tipo": "equipe", "id": "suporte-br"}]}
+        return {"fila_padrao": "p", "filas": [*({**base, **f} for f in filas), {**base, "id": "p", "ordem": 99}]}
+
+    def test_fila_inalcancavel_atras_de_outra_mais_ampla(self):
+        marca_ip = {"todas": [{"campo": "marca", "operador": "igual", "valor": "infinitepay"}]}
+        credito_ip = {"todas": [{"campo": "marca", "operador": "igual", "valor": "infinitepay"},
+                                {"campo": "categoria", "operador": "igual", "valor": "credito"}]}
+        ruim = self._regras({"id": "ip", "ordem": 1, "condicoes": marca_ip},
+                            {"id": "ip-credito", "ordem": 2, "condicoes": credito_ip})
+        assert any("ip-credito: fila inalcançável" in e for e in validar(ruim, GRUPOS).erros)
+        boa = self._regras({"id": "ip-credito", "ordem": 1, "condicoes": credito_ip},
+                           {"id": "ip", "ordem": 2, "condicoes": marca_ip})
+        assert validar(boa, GRUPOS).valida
+
+    def test_qualquer_vazio_nunca_casa(self):
+        ruim = self._regras({"id": "x", "ordem": 1, "condicoes": {"qualquer": []}})
+        assert any("x: fila inalcançável" in e for e in validar(ruim, GRUPOS).erros)
+
+    def test_fila_sem_atendente_elegivel(self):
+        regras = self._regras({"id": "x", "ordem": 1, "atendentes": [{"tipo": "equipe", "id": "credito-br"}],
+                               "condicoes": {"todas": [{"campo": "categoria", "operador": "igual", "valor": "credito"}]}})
+        elegiveis = GRUPOS - {("equipe", "credito-br")}
+        assert any("x: nenhum grupo tem atendente elegível" in e for e in validar(regras, GRUPOS, elegiveis).erros)
+        assert validar(regras, GRUPOS, GRUPOS).valida
+
+    def test_slas_sobrepostos(self):
+        cond = {"todas": [{"campo": "canal", "operador": "igual", "valor": "email"}]}
+        ruim = self._regras({"id": "x", "ordem": 1, "condicoes": cond,
+                             "slas": [{"prioridade": None, "limite_s": 600}, {"prioridade": 3, "limite_s": 60}]})
+        assert any("SLAs sobrepostos" in e for e in validar(ruim, GRUPOS).erros)
+        boa = self._regras({"id": "x", "ordem": 1, "condicoes": cond,
+                            "slas": [{"prioridade": 3, "limite_s": 60}, {"prioridade": 1, "limite_s": 600}]})
+        assert validar(boa, GRUPOS).valida
+
+    def test_catch_all_e_obrigatoria(self):
+        sem_padrao = self._regras({"id": "x", "ordem": 1, "condicoes": {}})
+        sem_padrao["fila_padrao"] = "nenhuma"
+        assert any("fila_padrao não existe" in e for e in validar(sem_padrao, GRUPOS).erros)
+
 
 class TestEscolha:
     def c(self, grupo, ativas, capacidade=3, tipo="humano", disponivel=True):

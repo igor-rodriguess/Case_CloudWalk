@@ -11,7 +11,7 @@ from nucleo.dominio.acoes import rotear_conversa
 from nucleo.dominio.roteador import rotear, validar
 from nucleo.dominio.transicionar import Ator, auditar
 from nucleo.infra.banco import Sessao, unidade
-from nucleo.infra.seed import grupos_existentes
+from nucleo.infra.seed import grupos_elegiveis, grupos_existentes
 
 router = APIRouter(prefix="/filas", tags=["filas"])
 
@@ -51,14 +51,14 @@ async def grupos():
 @router.post("/validar", summary="Valida regras sem salvar")
 async def validar_regras(regras: dict):
     async with Sessao() as s:
-        v = validar(regras, await grupos_existentes(s))
+        v = validar(regras, await grupos_existentes(s), await grupos_elegiveis(s))
     return {"valida": v.valida, "erros": v.erros}
 
 
 @router.post("/versoes", summary="Cria uma versão nova (inativa)")
 async def criar(corpo: NovaVersao):
     async with unidade() as s:
-        v = validar(corpo.regras, await grupos_existentes(s))
+        v = validar(corpo.regras, await grupos_existentes(s), await grupos_elegiveis(s))
         if not v.valida:
             raise HTTPException(422, {"erros": v.erros})
         r = await s.execute(
@@ -77,7 +77,7 @@ async def ativar(numero: int):
         regras = r.scalar()
         if regras is None:
             raise HTTPException(404, "versão não existe")
-        v = validar(regras, await grupos_existentes(s))
+        v = validar(regras, await grupos_existentes(s), await grupos_elegiveis(s))
         if not v.valida:
             raise HTTPException(422, {"erros": v.erros})
         await s.execute(text("SELECT pg_advisory_xact_lock(42)"))

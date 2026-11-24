@@ -67,7 +67,59 @@ def rotear(atendimento: dict, regras: dict, versao: int) -> DecisaoRoteamento:
     return DecisaoRoteamento(fila=regras["fila_padrao"], regra="fila_padrao", versao=versao)
 
 
-def validar(regras: dict, grupos_existentes: set[tuple[str, str]]) -> ResultadoValidacao:
+def filas_inalcancaveis(regras: dict) -> list[str]:
+    """Filas ativas que nenhum atendimento alcança (ficam atrás de outra que casa antes).
+
+    Exata: percorre todas as combinações dos campos. Os de domínio fechado usam o domínio
+    inteiro; os abertos (categoria, segmento) usam os valores citados nas regras mais um
+    valor que nenhuma regra cita. Com os campos de hoje, poucos milhares de combinações.
+    """
+    from itertools import product
+
+    filas = [f for f in regras.get("filas") or [] if f.get("ativa", True) and f.get("id") != regras.get("fila_padrao")]
+    dominios: dict[str, list] = {c: sorted(v, key=str) for c, v in VALORES.items()}
+    for campo in CAMPOS - set(VALORES):
+        citados = set()
+        for f in filas:
+            cond = f.get("condicoes") or {}
+            for c in cond.get("todas", cond.get("qualquer", [])):
+                if c.get("campo") == campo:
+                    v = c.get("valor")
+                    citados.update(v if isinstance(v, list) else [v])
+        dominios[campo] = sorted(citados, key=str) + ["__outro__"]
+    campos = sorted(dominios)
+    alcancadas = set()
+    for valores in product(*(dominios[c] for c in campos)):
+        atendimento = dict(zip(campos, valores))
+        for f in sorted(filas, key=lambda x: x.get("ordem", 0)):
+            if condicoes_que_casam(f.get("condicoes") or {}, atendimento) is not None:
+                alcancadas.add(f["id"])
+                break
+        if len(alcancadas) == len(filas):
+            break
+    return [f["id"] for f in filas if f["id"] not in alcancadas]
+
+
+def _slas_sobrepostos(f: dict) -> list[str]:
+    """`slas` de uma fila: [{"prioridade": 1|2|3|None, "limite_s": int}]; None vale para todas."""
+    erros, vistas = [], []
+    for s in f.get("slas") or []:
+        p, limite = s.get("prioridade"), s.get("limite_s")
+        if p not in (None, 1, 2, 3):
+            erros.append(f"{f.get('id')}: SLA com prioridade inválida {p}")
+        if not isinstance(limite, int) or limite <= 0:
+            erros.append(f"{f.get('id')}: SLA precisa de limite_s inteiro positivo")
+        cobre = {1, 2, 3} if p is None else {p}
+        if any(cobre & v for v in vistas):
+            erros.append(f"{f.get('id')}: SLAs sobrepostos para a prioridade {sorted(cobre)}")
+        vistas.append(cobre)
+    return erros
+
+
+def validar(regras: dict, grupos_existentes: set[tuple[str, str]],
+            grupos_elegiveis: set[tuple[str, str]] | None = None) -> ResultadoValidacao:
+    """`grupos_elegiveis`: grupos com pelo menos um atendente com capacidade. Sem ele, só se
+    confere que o grupo existe."""
     r = ResultadoValidacao()
     filas = regras.get("filas") or []
     ids = [f.get("id") for f in filas]
@@ -89,6 +141,10 @@ def validar(regras: dict, grupos_existentes: set[tuple[str, str]]) -> ResultadoV
         for g in f.get("atendentes") or []:
             if (g.get("tipo"), g.get("id")) not in grupos_existentes:
                 r.erros.append(f"{nome}: grupo {g.get('tipo')}:{g.get('id')} não existe")
+        if (grupos_elegiveis is not None and f.get("ativa", True) and f.get("atendentes")
+                and not any((g.get("tipo"), g.get("id")) in grupos_elegiveis for g in f["atendentes"])):
+            r.erros.append(f"{nome}: nenhum grupo tem atendente elegível (com capacidade)")
+        r.erros.extend(_slas_sobrepostos(f))
         cond = f.get("condicoes") or {}
         lista = cond.get("todas", cond.get("qualquer", []))
         for c in lista:
@@ -107,4 +163,7 @@ def validar(regras: dict, grupos_existentes: set[tuple[str, str]]) -> ResultadoV
                 invalidos = [v for v in valores if v not in VALORES[campo]]
                 if invalidos:
                     r.erros.append(f"{nome}: valor inválido para {campo}: {invalidos}")
+    if r.valida:  # só roda o roteador sobre regras bem formadas
+        for fid in filas_inalcancaveis(regras):
+            r.erros.append(f"{fid}: fila inalcançável (outra fila anterior casa todos os atendimentos dela)")
     return r
