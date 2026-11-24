@@ -1,0 +1,14 @@
+{
+  "hipotese": "H3",
+  "pedidos": 1000,
+  "aceitos": 1000,
+  "escaladas": 1000,
+  "com_nota_de_handoff": 1000,
+  "com_tempo_estimado_gravado": 1000,
+  "aviso_com_tempo_entregue_ao_cliente": 1000,
+  "tempo_estimado_s": {
+    "min": 0,
+    "max": 52800
+  },
+  "passa": true
+}

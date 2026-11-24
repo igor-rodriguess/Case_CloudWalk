@@ -1,0 +1,13 @@
+{
+  "teste": "reconciliacao",
+  "invariantes": {
+    "I1_mensagem_sem_desfecho": 0,
+    "I1b_esperando_humano": 0,
+    "I2_outbox_parada": 0,
+    "I3_resposta_duplicada": 0,
+    "I4_resposta_fora_de_dono": 0,
+    "I5_capacidade": 0,
+    "I7_escala_sem_nota": 0,
+    "I6_conversa_aberta_duplicada": 0
+  }
+}

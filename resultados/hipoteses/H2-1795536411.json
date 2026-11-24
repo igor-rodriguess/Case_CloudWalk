@@ -1,0 +1,18 @@
+{
+  "hipotese": "H2",
+  "conversas": 400,
+  "mensagens": 2000,
+  "reenvios_do_canal": 380,
+  "reenvios_absorvidos_na_entrada": 380,
+  "envenenadas": 20,
+  "itens_em_erro_antes_do_replay": 9,
+  "estacionados_atras_deles": 25,
+  "relay_fora_s": 37.8,
+  "entregas_ao_cliente": 2000,
+  "entregas_duplicadas_ao_cliente": 0,
+  "respostas_duplicadas_da_ia": 0,
+  "reentregas_do_relay_absorvidas_no_canal": 0,
+  "violacoes_de_ordem": 0,
+  "saidas_pendentes_no_fim": 0,
+  "passa": true
+}

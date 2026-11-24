@@ -1,0 +1,14 @@
+﻿
+ Container helpdesk-100mil Creating 
+ Container helpdesk-100mil Created 
+{"teste": "T4c-volume-cadenciado", "execucao": "T2-1795533867", "inicio_epoch": 1795533867.9030597, "fim_epoch": 
+1795536073.1268432, "mensagens": 100000, "clientes": 20000, "taxa_oferecida_msg_s": 50.0, "envio_s": 2182.9, 
+"vazao_entrada_msg_s": 45.8, "post_p50_s": 1.484, "post_p95_s": 6.357, "post_p99_s": 9.513, "status_http": {"200": 
+100000}, "drenagem_s": 22.3, "ate_ultima_resposta_s": 2205.2, "conversas": 20000, "conversas_sem_resposta": 0, 
+"mensagens_sem_resposta_propria": 0, "enviadas": 100000, "recusadas": 0, "perdidas": 0, "duplicadas": 0, "escaladas": 
+0, "respondidas": 100000, "espera_p95_s": 8.739, "p95_interna_s": 0.447, "cpu_medio_pct": {}}
+{"teste": "reconciliacao", "invariantes": {"I1_mensagem_sem_desfecho": 0, "I1b_esperando_humano": 0, 
+"I2_outbox_parada": 0, "I3_resposta_duplicada": 0, "I4_resposta_fora_de_dono": 0, "I5_capacidade": 0, 
+"I7_escala_sem_nota": 0, "I6_conversa_aberta_duplicada": 0}}
+
+
