@@ -23,8 +23,11 @@ from carga.falhas import RAIZ, parar_por
 from carga.gerador import reproduzir
 from carga.juiz import NUCLEO_DB, julgar
 
-NUCLEO = "http://localhost:8000"
-MOCK = "http://localhost:8200"
+# Dentro da rede do compose (CARGA_DENTRO_DOCKER=1) os endereços mudam e o compose não é chamado:
+# o encaminhamento de porta do Docker Desktop no Windows limita a ~20 req/s (docs/testes-de-carga.md).
+NUCLEO = os.getenv("CARGA_NUCLEO", "http://localhost:8000")
+MOCK = os.getenv("CARGA_MOCK", "http://localhost:8200")
+DENTRO_DOCKER = os.getenv("CARGA_DENTRO_DOCKER") == "1"
 CHAVES = {"E1": ["OUTBOX_ATIVA", "INBOX_ATIVA"], "E3b": ["INBOX_ATIVA"], "E6": ["OUTBOX_ATIVA"]}
 RESULTADOS = RAIZ / "resultados"
 
@@ -34,8 +37,9 @@ def preparar(cenario: str, posicao: str) -> dict:
     env = {**os.environ, "OUTBOX_ATIVA": "true", "INBOX_ATIVA": "true"}
     for chave in CHAVES[cenario]:
         env[chave] = valor
-    subprocess.run(["docker", "compose", "up", "-d", "broker", "agente_mock", "canais", "nucleo", "trabalhador"],
-                   cwd=RAIZ, env=env, check=True, capture_output=True)
+    if not DENTRO_DOCKER:
+        subprocess.run(["docker", "compose", "up", "-d", "broker", "agente_mock", "canais", "nucleo", "trabalhador"],
+                       cwd=RAIZ, env=env, check=True, capture_output=True)
     esperado = {k: env[k] == "true" for k in ("OUTBOX_ATIVA", "INBOX_ATIVA")}
     for _ in range(120):
         try:

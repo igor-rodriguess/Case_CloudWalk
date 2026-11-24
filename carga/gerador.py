@@ -24,7 +24,11 @@ class Registro:
     latencia_req_s: float = 0.0
 
 
-EM_VOO = 150  # abaixo do pool (200): a fila fica no semáforo, não dentro do httpcore
+import os
+
+# Abaixo do pool (200): a fila fica no semáforo, não dentro do httpcore. Dentro do Docker, 50 é
+# o ponto de maior vazão medido pela bancada (carga/bancada.py).
+EM_VOO = int(os.getenv("CARGA_EM_VOO", "150"))
 
 
 async def _enviar(cliente: httpx.AsyncClient, url: str, envio: Envio, reg: Registro,
