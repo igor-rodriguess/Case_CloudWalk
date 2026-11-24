@@ -112,6 +112,26 @@ As telas atenderam 79 leituras/s no total (4.740 em 60 s), contra 50 msg/s de es
 
 ### T4 Volume (100 mil mensagens)
 
+Três rodadas de 100 mil mensagens de 20 mil clientes (5 cada), cada uma com o banco zerado.
+
+| Rodada | Entrada | Respostas próprias | Conversas sem resposta | Duplicatas | Escaladas por prazo | Reconciliação |
+|---|---|---|---|---|---|---|
+| 1. Rajada, mock antigo (23/11, 22h53) | 52,9 msg/s | 98.419 (1.581 agrupadas) | 0 | 0 | 0 | zero |
+| 2. Rajada, mock novo (24/11, 00h11) | 54,6 msg/s | 49.699 | 10.181 | 0 | 29.554 mensagens (10.488 prazos vencidos) | I1 6.806, I1b 8.220 |
+| 3. Cadenciada a 25 msg/s, mock novo (24/11, 09h25) | 25,0 msg/s | **100.000** | **0** | **0** | **0** | **zero** |
+
+- **Mock novo** (`09675ca`): na atribuição, o agente responde cada mensagem que esperou na fila, não só a última; o juiz liga cada resposta pela `sequencia` (`d85bf8c`). Pedido do usuário: as 100 mil respondidas.
+- **Rodada 2: colapso acima do joelho.** Às 00h29 a volta do broker para o núcleo caiu de ~4.000 para ~700 eventos/min, enquanto a ida seguia em ~3.000/min (contagem nos logs do broker). Com a resposta mais de 30 s atrasada depois do ack, o `timeout_agente` venceu e escalou para humano, que o teste não tem. Cada escala acrescenta trabalho, e a volta não se recuperou até o fim. Nada duplicou e nenhuma mensagem sumiu do banco: o desenho degradou para escala, como previsto, mas sem analistas isso vira espera. A rodada 1 escapou do ciclo com entrada parecida (52,9 contra 54,6 msg/s). Não sabemos se a mudança do mock pesou (1,6% a mais de respostas) ou se foi a diferença de ritmo perto do ponto de virada: hipótese, não medida. A queda da volta (12 partições, cada uma esperando a resposta do núcleo antes da próxima) bate com a latência do `POST /agente/eventos` subindo para ~1 s, também hipótese.
+- **Rodada 3: a mesma carga em ritmo sustentável.** 25 msg/s do cliente (50 no total, a carga do experimento), 100 mil em 66,7 min:
+  - 100.000 de 100.000 respondidas, todas ligadas de forma exata pela outbox; 0 duplicatas, 0 escalas, reconciliação zerada;
+  - POST p50 0,07 s, p95 0,16 s; espera da resposta p50 1,1 s, p95 91 s, p99 186 s; p95 interna 33 s;
+  - o canal absorveu 31 reenvios do relay (`GET /duplicatas`): reservas de 30 s vencidas, coerentes com a p95 interna. Sem a deduplicação do canal, seriam 31 duplicatas.
+  - A cauda longa (p95 91 s com a mediana em 1 s) não aparece no E1 à mesma taxa, que tem conversas de 6 mensagens e menos estado aberto (aqui, 20 mil conversas abertas no fim). Não investigada; fica como limitação.
+  - Primeira tentativa invalidada: o computador dormiu das 07h44 às 09h22 e o gerador, ao voltar, mandou o atraso de uma vez. Refeita do zero com a suspensão bloqueada.
+  - O juiz do T4 usava a janela de -1 a 1 s, certa para a rajada (tudo no instante 0); no envio cadenciado ela julgou só as 25 primeiras. Corrigido em `carga/completo.py`; a rodada foi rejulgada do banco com `carga/rejulgar_volume.py` (`T4c-volume-cadenciado-rejulgado-*.json`).
+
+Detalhe da rodada 1:
+
 | Medida | Valor |
 |---|---|
 | Mensagens aceitas | 100.000 de 100.000 (todas HTTP 200, nenhuma recusa) |
@@ -136,7 +156,7 @@ I1, I1b e I2 a I6 com **zero** depois de cada bateria.
 | C2 Rajada | **Não passou no código antigo** (1 duplicata em 20 mil). Coberto pelo C5 no código novo |
 | C3 Front | **Não passa.** p95 de 3,6 a 4,2 s sob 100 clientes e 50 msg/s de fundo (meta < 1 s); 1 erro em 4.740. Sem carga, < 120 ms |
 | C4 Integridade | **Passa.** Zero em todas as invariantes |
-| C5 Volume | **Passa.** 100 mil aceitas, 0 conversas sem resposta, 0 duplicatas |
+| C5 Volume | **Passa.** Em rajada (rodada 1), 100 mil aceitas, 0 conversas sem resposta, 0 duplicatas. Com o agente respondendo cada mensagem, a rajada colapsou (rodada 2), e a mesma carga a 25 msg/s teve 100 mil de 100 mil respondidas, 0 duplicatas e reconciliação zerada (rodada 3) |
 
 **Pode avançar?** Sim para o front e a demonstração, com duas limitações declaradas.
 
