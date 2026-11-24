@@ -147,7 +147,7 @@ async def _tratar(conn, env: Envelope) -> None:
 
 
 async def consumir() -> None:
-    conn = await psycopg.AsyncConnection.connect(BANCO, autocommit=True)
+    conexoes: dict = {}
     consumidor = AIOKafkaConsumer(
         IDA, bootstrap_servers=KAFKA, group_id="agente-mock", enable_auto_commit=False,
         auto_offset_reset="earliest",
@@ -162,8 +162,13 @@ async def consumir() -> None:
                 continue
             if consumidor.paused():
                 consumidor.resume(*consumidor.paused())
-            lotes = await consumidor.getmany(timeout_ms=500, max_records=200)
-            for tp, mensagens in lotes.items():
+            lotes = await consumidor.getmany(timeout_ms=500, max_records=500)
+
+            async def particao(tp, mensagens):
+                # Partições em paralelo, cada uma com a sua conexão; dentro dela, em ordem (a chave
+                # é a conversa). Antes era tudo em série e o mock virava o gargalo sob carga.
+                if tp not in conexoes:
+                    conexoes[tp] = await psycopg.AsyncConnection.connect(BANCO, autocommit=True)
                 ultimo_ok = None
                 for msg in mensagens:
                     try:
@@ -173,23 +178,27 @@ async def consumir() -> None:
                         ultimo_ok = msg.offset  # malformado não melhora com nova tentativa
                         continue
                     try:
-                        await _tratar(conn, env)
+                        await _tratar(conexoes[tp], env)
                         ultimo_ok = msg.offset
                     except Exception:
                         # Falha do banco: não confirma; volta a esta mensagem com conexão nova.
                         log.exception("falha no offset %s; tentando de novo", msg.offset)
                         consumidor.seek(tp, msg.offset)
                         try:
-                            await conn.close()
+                            await conexoes.pop(tp).close()
                         finally:
                             await asyncio.sleep(1)
-                            conn = await psycopg.AsyncConnection.connect(BANCO, autocommit=True)
                         break
-                if ultimo_ok is not None:
-                    await consumidor.commit({tp: ultimo_ok + 1})
+                return tp, ultimo_ok
+
+            feitos = await asyncio.gather(*(particao(tp, msgs) for tp, msgs in lotes.items()))
+            confirmar = {tp: ultimo + 1 for tp, ultimo in feitos if ultimo is not None}
+            if confirmar:
+                await consumidor.commit(confirmar)
     finally:
         await consumidor.stop()
-        await conn.close()
+        for c in conexoes.values():
+            await c.close()
 
 
 async def publicar(produtor: AIOKafkaProducer) -> None:
@@ -203,12 +212,18 @@ async def publicar(produtor: AIOKafkaProducer) -> None:
                     "FOR UPDATE SKIP LOCKED"
                 )
                 linhas = await cur.fetchall()
-                for id_evento, id_conversa, payload in linhas:
+                # Envia o lote todo e espera os acks juntos (antes era um ack por vez). O produtor
+                # idempotente mantém a ordem de envio dentro da partição, logo dentro da conversa.
+                vezes = 2 if estado["modo"] == "duplicar" else 1
+                acks = []
+                for _id_evento, id_conversa, payload in linhas:
                     valor = json.dumps(payload).encode()
-                    vezes = 2 if estado["modo"] == "duplicar" else 1
                     for _ in range(vezes):
-                        await produtor.send_and_wait(VOLTA, value=valor, key=str(id_conversa).encode())
-                    await conn.execute("UPDATE respostas SET publicada = true WHERE id_evento = %s", (id_evento,))
+                        acks.append(await produtor.send(VOLTA, value=valor, key=str(id_conversa).encode()))
+                await asyncio.gather(*acks)
+                if linhas:
+                    await conn.execute("UPDATE respostas SET publicada = true WHERE id_evento = ANY(%s)",
+                                       ([x[0] for x in linhas],))
             if not linhas:
                 await asyncio.sleep(0.1)
         except Exception:

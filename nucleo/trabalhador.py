@@ -12,6 +12,7 @@ from nucleo.infra import agendador, distribuidor, relay
 from nucleo.infra.seed import semear
 
 logging.basicConfig(level=logging.INFO, format='{"servico":"trabalhador","nivel":"%(levelname)s","origem":"%(name)s","msg":"%(message)s"}')
+logging.getLogger("httpx").setLevel(logging.WARNING)  # uma linha por requisição custava CPU sob carga
 
 
 async def main() -> None:

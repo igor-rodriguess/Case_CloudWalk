@@ -3,6 +3,9 @@ name: helpdesk
 services:
   postgres:
     image: postgres:16-alpine
+    # 4 processos da API e 4 do trabalhador, com pool de até 30 conexões cada, mais mock e canais:
+    # o padrão de 100 conexões não basta.
+    command: ["postgres", "-c", "max_connections=400"]
     environment:
       POSTGRES_DB: helpdesk
       POSTGRES_USER: ${POSTGRES_USER:-helpdesk}
@@ -69,7 +72,7 @@ services:
   nucleo:
     image: helpdesk-app
     restart: on-failure
-    command: ["uvicorn", "nucleo.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+    command: ["uvicorn", "nucleo.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--workers", "4"]
     ports:
       - "${NUCLEO_PORTA:-8000}:8000"
     environment: &ambiente_nucleo
@@ -82,6 +85,9 @@ services:
       TIMEOUT_ATIVO: ${TIMEOUT_ATIVO:-true}
       TIMEOUT_AGENTE_S: ${TIMEOUT_AGENTE_S:-30}
       WORKERS_ATIVOS: "false"
+      # Pool do tamanho da concorrência: abaixo disso as conexões extras abriam e fechavam a cada
+      # uso (autenticação SCRAM a cada vez), queimando CPU no Postgres e no Python (24/11).
+      DB_POOL: ${DB_POOL:-20}
     depends_on:
       migracoes:
         condition: service_completed_successfully
@@ -91,18 +97,23 @@ services:
       timeout: 3s
       retries: 30
 
-  # Laços de fundo do núcleo: relay da outbox, agendador e distribuidor. Dois processos: um só
-  # saturava um núcleo de CPU nos testes de carga e atrasava o relay além da reserva (30 s).
+  # Laços de fundo do núcleo: relay da outbox, agendador e distribuidor. Quatro processos: nos
+  # testes de carga, cada processo chega a 100% de um núcleo de CPU (Python, um laço por processo);
+  # com dois, o relay saía ~50 itens/s e a outbox acumulava a 25 msg/s do cliente (24/11).
   # Seguro em paralelo: todo trabalho é reservado com FOR UPDATE SKIP LOCKED.
   trabalhador:
     image: helpdesk-app
     restart: on-failure
     deploy:
-      replicas: ${TRABALHADOR_REPLICAS:-2}
+      replicas: ${TRABALHADOR_REPLICAS:-4}
     command: ["python", "-m", "nucleo.trabalhador"]
     environment:
       <<: *ambiente_nucleo
       WORKERS_ATIVOS: "true"
+      # Por processo; com 4 processos, 16 no relay e 8 no distribuidor. Mais que isso só aumentava
+      # a disputa e as consultas em vão quando não há trabalho (24/11).
+      RELAY_WORKERS: ${RELAY_WORKERS:-4}
+      DISTRIBUIDOR_TAREFAS: ${DISTRIBUIDOR_TAREFAS:-2}
     depends_on:
       migracoes:
         condition: service_completed_successfully
@@ -110,7 +121,7 @@ services:
   broker:
     image: helpdesk-app
     restart: on-failure
-    command: ["uvicorn", "broker.main:app", "--host", "0.0.0.0", "--port", "8100"]
+    command: ["uvicorn", "broker.main:app", "--host", "0.0.0.0", "--port", "8100", "--no-access-log"]
     ports:
       - "${BROKER_PORTA:-8100}:8100"
     environment:
@@ -125,7 +136,7 @@ services:
   agente_mock:
     image: helpdesk-app
     restart: on-failure
-    command: ["uvicorn", "agente_mock.main:app", "--host", "0.0.0.0", "--port", "8200"]
+    command: ["uvicorn", "agente_mock.main:app", "--host", "0.0.0.0", "--port", "8200", "--no-access-log"]
     ports:
       - "${MOCK_PORTA:-8200}:8200"
     environment:
@@ -142,7 +153,7 @@ services:
   canais:
     image: helpdesk-app
     restart: on-failure
-    command: ["uvicorn", "canais.main:app", "--host", "0.0.0.0", "--port", "8300"]
+    command: ["uvicorn", "canais.main:app", "--host", "0.0.0.0", "--port", "8300", "--no-access-log"]
     ports:
       - "${CANAIS_PORTA:-8310}:8300"
     environment:

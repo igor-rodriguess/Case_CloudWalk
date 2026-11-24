@@ -245,6 +245,8 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--so", nargs="*", default=["T1", "T2", "T3", "R"])
     p.add_argument("--taxa", type=float, default=25.0, help="msg/s do cliente no T4c")
+    p.add_argument("--n", type=int, default=100_000, help="mensagens no T4c")
+    p.add_argument("--clientes", type=int, default=20_000, help="clientes no T4c")
     a = p.parse_args()
     if "T1" in a.so:
         print(json.dumps(asyncio.run(t1_rampa()), ensure_ascii=False), flush=True)
@@ -256,7 +258,7 @@ def main() -> None:
         print(json.dumps(asyncio.run(t2_rajada(n=100_000, clientes=20_000, nome="T4-volume")),
                          ensure_ascii=False), flush=True)
     if "T4c" in a.so:  # o mesmo volume em cadência sustentável (a carga do experimento, 50 msg/s totais)
-        print(json.dumps(asyncio.run(t2_rajada(n=100_000, clientes=20_000, nome="T4c-volume-cadenciado",
+        print(json.dumps(asyncio.run(t2_rajada(n=a.n, clientes=a.clientes, nome="T4c-volume-cadenciado",
                                                taxa=a.taxa)), ensure_ascii=False), flush=True)
     if "R" in a.so:
         print(json.dumps(reconciliacao(), ensure_ascii=False), flush=True)

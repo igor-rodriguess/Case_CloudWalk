@@ -27,6 +27,7 @@ RETENTATIVAS_MAX = int(os.getenv("RETENTATIVAS_MAX", 8))
 IDA, VOLTA, ERROS = "helpdesk.para-agente", "agente.para-helpdesk", "helpdesk.erros"
 
 logging.basicConfig(level=logging.INFO, format='{"servico":"broker","nivel":"%(levelname)s","msg":"%(message)s"}')
+logging.getLogger("httpx").setLevel(logging.WARNING)  # uma linha por requisição custava CPU sob carga
 log = logging.getLogger("broker")
 estado = {"produtor": None}
 
@@ -42,7 +43,8 @@ async def volta(produtor: AIOKafkaProducer) -> None:
         auto_offset_reset="earliest",
     )
     await consumidor.start()
-    http = httpx.AsyncClient(timeout=10)
+    # Até 64 chamadas ao núcleo em voo; esperar por uma conexão livre não conta como falha.
+    http = httpx.AsyncClient(timeout=httpx.Timeout(10, pool=None), limits=httpx.Limits(max_connections=64))
     falhas_500: dict[tuple, int] = {}
     pausadas: dict[TopicPartition, float] = {}
     try:
@@ -54,40 +56,59 @@ async def volta(produtor: AIOKafkaProducer) -> None:
                     pausadas.pop(tp)
             lotes = await consumidor.getmany(timeout_ms=500, max_records=500)
 
+            async def entregar(tp, msg) -> bool:
+                """True se a mensagem está resolvida (entregue ou desviada para helpdesk.erros)."""
+                try:  # o esquema é conferido pelo núcleo, que tolera tipo novo da 1.x
+                    corpo = json.loads(msg.value)
+                except ValueError as e:
+                    await _para_erros(produtor, msg.key, msg.value, f"json inválido: {str(e)[:200]}")
+                    return True
+                try:
+                    r = await http.post(f"{NUCLEO_URL}/agente/eventos", json=corpo)
+                    status = r.status_code
+                except httpx.HTTPError:
+                    status = 503
+                if status < 300:
+                    falhas_500.pop((tp, msg.offset), None)
+                    return True
+                if 400 <= status < 500:
+                    await _para_erros(produtor, msg.key, msg.value, f"núcleo respondeu {status}")
+                    return True
+                if status == 500:
+                    n = falhas_500.get((tp, msg.offset), 0) + 1
+                    falhas_500[(tp, msg.offset)] = n
+                    if n >= RETENTATIVAS_MAX:
+                        await _para_erros(produtor, msg.key, msg.value, "núcleo 500 repetido")
+                        return True
+                return False  # 503 ou rede
+
             async def particao(tp, mensagens):
-                # Partições em paralelo; dentro de cada uma, uma mensagem por vez (ordem da conversa).
+                # Dentro da partição, conversas diferentes em paralelo e cada conversa em ordem (a
+                # chave da mensagem é a conversa). Antes era uma mensagem por vez por partição, com um
+                # commit por mensagem: sob carga, a volta caía para ~700 eventos/min e o prazo do
+                # agente vencia. O offset só avança até antes da primeira falha; o que foi entregue
+                # depois dela volta a ser entregue, e a inbox do núcleo descarta (pelo menos uma vez).
+                por_conversa: dict[bytes | None, list] = {}
                 for msg in mensagens:
-                    try:  # o esquema é conferido pelo núcleo, que tolera tipo novo da 1.x
-                        corpo = json.loads(msg.value)
-                    except ValueError as e:
-                        await _para_erros(produtor, msg.key, msg.value, f"json inválido: {str(e)[:200]}")
-                        await consumidor.commit({tp: msg.offset + 1})
-                        continue
-                    try:
-                        r = await http.post(f"{NUCLEO_URL}/agente/eventos", json=corpo)
-                        status = r.status_code
-                    except httpx.HTTPError:
-                        status = 503
-                    if status < 300:
-                        await consumidor.commit({tp: msg.offset + 1})
-                        falhas_500.pop((tp, msg.offset), None)
-                        continue
-                    if 400 <= status < 500:
-                        await _para_erros(produtor, msg.key, msg.value, f"núcleo respondeu {status}")
-                        await consumidor.commit({tp: msg.offset + 1})
-                        continue
-                    if status == 500:
-                        n = falhas_500.get((tp, msg.offset), 0) + 1
-                        falhas_500[(tp, msg.offset)] = n
-                        if n >= RETENTATIVAS_MAX:
-                            await _para_erros(produtor, msg.key, msg.value, "núcleo 500 repetido")
-                            await consumidor.commit({tp: msg.offset + 1})
-                            continue
-                    # 503 ou rede: volta para esta mensagem e pausa a partição por um tempo.
-                    consumidor.seek(tp, msg.offset)
-                    consumidor.pause(tp)
-                    pausadas[tp] = agora + min(30, 0.5 * 2 ** min(falhas_500.get((tp, msg.offset), 1), 6))
+                    por_conversa.setdefault(msg.key, []).append(msg)
+                falhou: list[int] = []
+
+                async def conversa(msgs):
+                    for msg in msgs:
+                        if not await entregar(tp, msg):
+                            falhou.append(msg.offset)
+                            return
+
+                await asyncio.gather(*(conversa(m) for m in por_conversa.values()))
+                if not falhou:
+                    await consumidor.commit({tp: mensagens[-1].offset + 1})
                     return
+                primeira = min(falhou)
+                if primeira > mensagens[0].offset:
+                    await consumidor.commit({tp: primeira})
+                consumidor.seek(tp, primeira)
+                consumidor.pause(tp)
+                pausadas[tp] = agora + min(30, 0.5 * 2 ** min(falhas_500.get((tp, primeira), 1), 6))
 
             await asyncio.gather(*(particao(tp, msgs) for tp, msgs in lotes.items()))
     finally:

@@ -3,6 +3,7 @@ ao cliente e guarda cada entrega, inclusive repetidas. É a ponta onde o juiz do
 conta o que o cliente de fato recebeu. `POST /modo` com `fora` simula o canal indisponível.
 """
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from typing import Literal
@@ -13,7 +14,31 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 BANCO = os.getenv("CANAIS_DATABASE_URL", "postgresql://helpdesk:helpdesk@localhost:5433/canais")
+CONEXOES = int(os.getenv("CANAIS_CONEXOES", 10))
 estado = {"modo": "normal"}
+_livres: asyncio.Queue = asyncio.Queue()
+_abertas = {"n": 0}
+
+
+@asynccontextmanager
+async def conexao():
+    """Pool mínimo: antes cada entrega abria uma conexão nova (autenticação a cada vez)."""
+    if _livres.empty() and _abertas["n"] < CONEXOES:
+        _abertas["n"] += 1
+        try:
+            _livres.put_nowait(await psycopg.AsyncConnection.connect(BANCO, autocommit=True))
+        except Exception:
+            _abertas["n"] -= 1
+            raise
+    conn = await _livres.get()
+    try:
+        yield conn
+    except psycopg.OperationalError:
+        _abertas["n"] -= 1
+        await conn.close()
+        raise
+    else:
+        _livres.put_nowait(conn)
 
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS entregas (
@@ -56,7 +81,7 @@ app = FastAPI(title="Simulador de canais", lifespan=ciclo_de_vida)
 async def entregar(e: Entrega):
     if estado["modo"] == "fora":
         return JSONResponse(status_code=503, content={"erro": "canal indisponível"})
-    async with await psycopg.AsyncConnection.connect(BANCO, autocommit=True) as conn:
+    async with conexao() as conn:
         cur = await conn.execute(
             "INSERT INTO entregas (id_evento, id_conversa, canal, autor, conteudo, causado_por, sequencia) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (id_evento) DO NOTHING RETURNING id",
@@ -71,7 +96,7 @@ async def entregar(e: Entrega):
 
 @app.get("/entregas")
 async def listar(id_conversa: str):
-    async with await psycopg.AsyncConnection.connect(BANCO, autocommit=True) as conn:
+    async with conexao() as conn:
         cur = await conn.execute(
             "SELECT id_evento, autor, conteudo, recebida_em, causado_por FROM entregas "
             "WHERE id_conversa = %s ORDER BY id",
@@ -87,7 +112,7 @@ async def listar(id_conversa: str):
 @app.get("/duplicatas")
 async def duplicatas():
     """Reenvios do relay absorvidos pela deduplicação do adaptador (pelo menos uma vez)."""
-    async with await psycopg.AsyncConnection.connect(BANCO, autocommit=True) as conn:
+    async with conexao() as conn:
         cur = await conn.execute("SELECT count(*) FROM duplicatas_absorvidas")
         return {"absorvidas": (await cur.fetchone())[0]}
 

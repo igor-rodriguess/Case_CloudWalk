@@ -18,7 +18,12 @@ from nucleo.infra.banco import Sessao, unidade
 
 log = logging.getLogger("distribuidor")
 
-PEGAR = """
+# Pega um lote da fila, na ordem (prioridade da fila, escalada antes, prioridade com
+# envelhecimento, chegada), travado com SKIP LOCKED: tarefas em paralelo recebem lotes disjuntos.
+# O lote inteiro é atribuído numa transação, cada conversa pelo transicionar sob a sua trava.
+# Histórico (testes de carga, 24/11): uma ordenação da fila inteira por conversa derrubava a vazão
+# conforme a fila crescia; lote ordenado sem trava fazia as tarefas disputarem as mesmas linhas.
+PEGAR_LOTE = """
 SELECT c.id, c.id_fila, c.origem FROM conversas c
 JOIN unnest(CAST(:filas AS text[]), CAST(:prios AS int[])) AS f(id_fila, prioridade) ON f.id_fila = c.id_fila
 WHERE c.estado IN ('na_fila', 'escalada')
@@ -27,7 +32,7 @@ ORDER BY f.prioridade DESC,
          coalesce(c.prioridade, 1)
            + floor(extract(epoch FROM now() - coalesce(c.na_fila_desde, c.criada_em)) / :env) DESC,
          coalesce(c.na_fila_desde, c.criada_em)
-LIMIT 1
+LIMIT :lote
 FOR UPDATE OF c SKIP LOCKED
 """
 
@@ -63,37 +68,43 @@ async def _ciclo() -> int:
     while elegiveis:
         async with unidade() as s:
             r = await s.execute(
-                text(PEGAR),
-                {"filas": list(elegiveis), "prios": list(elegiveis.values()), "env": config.ENVELHECIMENTO_S},
+                text(PEGAR_LOTE),
+                {"filas": list(elegiveis), "prios": list(elegiveis.values()), "env": config.ENVELHECIMENTO_S,
+                 "lote": config.DISTRIBUIDOR_LOTE},
             )
-            linha = r.mappings().first()
-            if linha is None:
+            lote = [dict(x) for x in r.mappings().all()]
+            if not lote:
                 return atribuidas
-            fila = filas[linha["id_fila"]]
-            candidatos = _candidatos(fila, await _atendentes(s), linha["origem"])
-            escolha = escolher(candidatos)
-            await auditar(
-                s, "decisao_distribuicao", SISTEMA, linha["id"], fila=fila["id"],
-                candidatos=[c.__dict__ for c in candidatos], escolhido=escolha.id, motivo=escolha.motivo,
-            )
-            if escolha.id is None:
-                elegiveis.pop(linha["id_fila"], None)
-                continue
-            tipo = next(c.tipo for c in candidatos if c.id == escolha.id)
-            para = "com_ia" if tipo == "ia" else "com_humano"
+            for linha in lote:
+                if linha["id_fila"] not in elegiveis:
+                    continue  # a fila lotou neste lote; a conversa fica para o próximo ciclo
+                fila = filas[linha["id_fila"]]
+                candidatos = _candidatos(fila, await _atendentes(s), linha["origem"])
+                escolha = escolher(candidatos)
+                await auditar(
+                    s, "decisao_distribuicao", SISTEMA, linha["id"], fila=fila["id"],
+                    candidatos=[c.__dict__ for c in candidatos], escolhido=escolha.id, motivo=escolha.motivo,
+                )
+                if escolha.id is None:
+                    elegiveis.pop(linha["id_fila"], None)
+                    continue
+                tipo = next(c.tipo for c in candidatos if c.id == escolha.id)
+                para = "com_ia" if tipo == "ia" else "com_humano"
 
-            async def saidas(s2, c):
-                if para != "com_ia":
-                    return []
-                return [novo_evento("conversa.atribuida", c, await contexto_para_ia(s2, c))]
+                async def saidas(s2, c, para=para):
+                    if para != "com_ia":
+                        return []
+                    return [novo_evento("conversa.atribuida", c, await contexto_para_ia(s2, c))]
 
-            resultado, _ = await transicionar(
-                s, linha["id"], para, SISTEMA, id_atendente=escolha.id, id_fila=fila["id"], saidas=saidas
-            )
-            if resultado == Resultado.SEM_CAPACIDADE:
-                elegiveis.pop(linha["id_fila"], None)
-            elif resultado == Resultado.APLICADO:
-                atribuidas += 1
+                resultado, _ = await transicionar(
+                    s, linha["id"], para, SISTEMA, id_atendente=escolha.id, id_fila=fila["id"], saidas=saidas
+                )
+                if resultado == Resultado.SEM_CAPACIDADE:
+                    elegiveis.pop(linha["id_fila"], None)
+                elif resultado == Resultado.APLICADO:
+                    atribuidas += 1
+        if len(lote) < config.DISTRIBUIDOR_LOTE:
+            return atribuidas
     return atribuidas
 
 
