@@ -205,6 +205,18 @@ export default function PainelAnalista() {
                     >
                       Encerrar
                     </Botao>
+                    <Botao
+                      disabled={ocupado}
+                      onClick={() =>
+                        acao(
+                          `/painel/conversas/${c.id}/ouvidoria`,
+                          { ouvidoria: !c.ouvidoria },
+                          c.ouvidoria ? "Conversa fora da ouvidoria." : "Conversa marcada como ouvidoria: fica fora do expurgo.",
+                        )
+                      }
+                    >
+                      {c.ouvidoria ? "Tirar da ouvidoria" : "Marcar ouvidoria"}
+                    </Botao>
                     {!ehMinha && !podeAssumir && (
                       <span className="self-center text-xs text-zinc-500">
                         Responder, devolver e encerrar só com a conversa com você (estado com analista).
