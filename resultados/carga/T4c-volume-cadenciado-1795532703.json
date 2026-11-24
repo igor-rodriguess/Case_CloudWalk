@@ -1,0 +1,31 @@
+{
+  "teste": "T4c-volume-cadenciado",
+  "execucao": "T2-1795532079",
+  "inicio_epoch": 1795532079.6598184,
+  "fim_epoch": 1795532701.8508344,
+  "mensagens": 15000,
+  "clientes": 2000,
+  "taxa_oferecida_msg_s": 25.0,
+  "envio_s": 600.1,
+  "vazao_entrada_msg_s": 25.0,
+  "post_p50_s": 0.08,
+  "post_p95_s": 0.161,
+  "post_p99_s": 0.252,
+  "status_http": {
+    "200": 15000
+  },
+  "drenagem_s": 22.1,
+  "ate_ultima_resposta_s": 622.2,
+  "conversas": 2000,
+  "conversas_sem_resposta": 0,
+  "mensagens_sem_resposta_propria": 0,
+  "enviadas": 15000,
+  "recusadas": 0,
+  "perdidas": 0,
+  "duplicadas": 0,
+  "escaladas": 0,
+  "respondidas": 15000,
+  "espera_p95_s": 2.344,
+  "p95_interna_s": 0.191,
+  "cpu_medio_pct": {}
+}
