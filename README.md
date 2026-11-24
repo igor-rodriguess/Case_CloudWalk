@@ -90,9 +90,13 @@ A demonstração tem reserva sem o front: `carga/demo.py` percorre os 7 momentos
 .venv\Scripts\python -m carga.demo
 ```
 
-## Configuração
+## Modelos e configurações
 
-Variáveis do núcleo (no `.env` ou no ambiente do compose): `OUTBOX_ATIVA`, `INBOX_ATIVA`, `FENCING_ATIVO`, `TIMEOUT_ATIVO` (chaves de ablação, `true` por padrão), `TIMEOUT_AGENTE_S` (30), `RETENTATIVAS_MAX` (8), `HISTORICO_N` (20), `CAPACIDADE_HUMANO` (3), `CAPACIDADE_IA` (1.000.000, na prática sem limite), `ENVELHECIMENTO_S` (600, hipótese). Lista completa em `docs/implementacao.md`, seção 10. As filas são configuradas pela API (`/filas`), sem deploy.
+**Agente (simulado).** Mock determinístico, sem LLM: `agente_mock/main.py`, versão = o commit do repositório. Não há modelo nem temperatura; a resposta é uma frase fixa por troca (6 por idioma) e a decisão de escalar é uma expressão regular sobre a última mensagem do cliente. Configuração: `LATENCIA_MS` (800, latência simulada por resposta), `MOCK_TROCAS` (6, trocas até resolver), `TIMEOUT_AGENTE_S` (30) e o modo (`normal`, `lento`, `duplicar`, `fora`, por `POST /modo`). Na atribuição, responde cada mensagem do cliente que esperou na fila, com `sequencia` 0, 1, 2 (ids próprios). Determinístico de propósito: o experimento mede a plataforma, não a qualidade das respostas.
+
+**Canais (simulados).** `canais/main.py` grava cada entrega e deduplica pelo id do evento. `POST /modo` aceita `fora` (canal indisponível) e `recusar` (trecho de conteúdo recusado com 500, usado na hipótese H2).
+
+**Núcleo.** Variáveis do núcleo (no `.env` ou no ambiente do compose): `OUTBOX_ATIVA`, `INBOX_ATIVA`, `FENCING_ATIVO`, `TIMEOUT_ATIVO` (chaves de ablação, `true` por padrão), `TIMEOUT_AGENTE_S` (30), `RETENTATIVAS_MAX` (8), `HISTORICO_N` (20), `CAPACIDADE_HUMANO` (3), `CAPACIDADE_IA` (1.000.000, na prática sem limite), `ENVELHECIMENTO_S` (600, hipótese). Lista completa em `docs/implementacao.md`, seção 10. As filas são configuradas pela API (`/filas`), sem deploy.
 
 ## Metodologia do experimento
 
