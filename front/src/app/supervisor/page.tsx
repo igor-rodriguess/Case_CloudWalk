@@ -16,6 +16,7 @@ const INVARIANTES: Record<string, string> = {
   I4_resposta_fora_de_dono: "Resposta da IA gravada com atribuição diferente da declarada",
   I5_capacidade: "Analista acima da capacidade ou contagem divergente das atribuições",
   I6_conversa_aberta_duplicada: "Mais de uma conversa aberta por cliente e marca",
+  I7_escala_sem_nota: "Escala sem resumo de handoff",
 };
 
 function Numero({ rotulo, valor, detalhe }: { rotulo: string; valor: React.ReactNode; detalhe?: string }) {

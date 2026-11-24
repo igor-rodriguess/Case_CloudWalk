@@ -32,8 +32,32 @@ export interface Conversa {
   resolvida_em: string | null;
   na_fila_desde: string | null;
   motivo_encerramento: string | null;
+  sla_acumulado_ms?: number;
+  sla_desde?: string | null;
+  sla_limite_s?: number | null;
+  ouvidoria?: boolean;
   cliente: string;
   atendente: string | null;
+}
+
+export interface SaltoTraco {
+  onde: string;
+  o_que: string;
+  quando: string;
+  ms: number;
+  id_evento?: string;
+  id_externo?: string | null;
+  tentativas?: number;
+  sequencia?: number;
+}
+
+export interface Traco {
+  id_mensagem: string;
+  id_externo: string | null;
+  conteudo: string;
+  eventos_ao_agente: string[];
+  saltos: SaltoTraco[];
+  ponta_a_ponta_ms: number | null;
 }
 
 export interface Mensagem {
