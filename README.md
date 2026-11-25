@@ -66,10 +66,11 @@ O que o desenho previa e não tem teste automatizado está em `docs/implementaca
 
 ## Front-end
 
-A interface está em [`front/`](front/) (Next.js e TypeScript) e consome a API do núcleo pelo contrato de [`docs/api-front.md`](docs/api-front.md) e do OpenAPI em `/docs`. Sem autenticação: o perfil é escolhido na tela.
+A interface está em [`front/`](front/) (Next.js e TypeScript), com a identidade visual da CloudWalk (fundo escuro, verde-terminal, Gabarito e IBM Plex Mono), e consome a API do núcleo pelo contrato de [`docs/api-front.md`](docs/api-front.md) e do OpenAPI em `/docs`. Sem autenticação: o perfil é escolhido na tela.
 
 | Tela | O que cobre do TAP |
 |---|---|
+| `/` (ao vivo) | Painel da operação: chamadas por segundo (lojistas, IA, analistas), tempo de resposta da IA, conversas abertas; botões de tráfego sintético para a demonstração (`POST /demo/trafego`, rotulado DEMO) |
 | `/cliente` | Conversa do lojista com o atendente: marca, canal (chat, WhatsApp, e-mail), reenvio deduplicado |
 | `/analista` | Painel do analista: fila de escalas, resumo com as mensagens-fonte, histórico, perfil, auditoria; assumir, responder, devolver para a IA, encerrar |
 | `/filas` | Filas editáveis pela operação: editor, validar, simular, criar versão, ativar, rollback |
