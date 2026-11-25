@@ -59,5 +59,5 @@ Tema: a ideia, a arquitetura e o desenvolvimento do case CloudWalk. Linguagem de
 |---|---|
 | Usa inteligência artificial própria? | Não; a IA é a da CloudWalk, simulada no case, como o TAP permite. O foco foi a plataforma que recebe a IA |
 | Aguenta o volume da empresa? | Sim, com folga para o dia normal: testei 100 mil mensagens; o dia típico tem cerca de 120 mil somando as duas direções |
-| Quanto tempo para colocar no ar? | Da cópia do projeto ao sistema rodando: 3 minutos e meio |
+| Quanto tempo para colocar no ar? | Da cópia do projeto ao sistema rodando: pouco mais de 3 minutos (medido: 3,3 min) |
 | O que faltou? | Ligar o agente real, autenticação de usuários e espalhar em várias máquinas |
