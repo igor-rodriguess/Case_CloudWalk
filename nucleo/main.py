@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
 
 from nucleo import config
-from nucleo.api import agente, conversas, filas, mensagens, painel, supervisor
+from nucleo.api import agente, conversas, demo, filas, mensagens, painel, supervisor
 from nucleo.infra import agendador, distribuidor, relay
 from nucleo.infra.seed import semear
 
@@ -57,5 +57,5 @@ async def saude():
     return {"ok": True}
 
 
-for modulo in (mensagens, agente, painel, conversas, filas, supervisor):
+for modulo in (mensagens, agente, painel, conversas, filas, supervisor, demo):
     app.include_router(modulo.router)

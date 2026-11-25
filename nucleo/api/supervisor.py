@@ -123,3 +123,54 @@ async def expurgo(dias: int = config.RETENCAO_DIAS):
         conversas, mensagens, saidas, notas = (await s.execute(text(EXPURGO), {"dias": dias})).one()
     return {"conversas": conversas, "mensagens": mensagens, "outbox": saidas, "notas_de_escala": notas,
             "retencao_dias": dias}
+
+
+SERIE = """
+WITH baldes AS (
+    SELECT generate_series(date_bin(make_interval(secs => :passo), now() - make_interval(mins => :minutos),
+                                    timestamptz '2000-01-01'),
+                           now(), make_interval(secs => :passo)) AS t
+), msgs AS (
+    SELECT date_bin(make_interval(secs => :passo), m.criada_em, timestamptz '2000-01-01') AS t,
+           count(*) FILTER (WHERE m.autor_tipo = 'cliente') AS cliente,
+           count(*) FILTER (WHERE m.autor_tipo = 'ia') AS ia,
+           count(*) FILTER (WHERE m.autor_tipo = 'humano') AS humano,
+           percentile_cont(0.95) WITHIN GROUP (ORDER BY extract(epoch FROM m.criada_em - o.criado_em))
+               FILTER (WHERE m.autor_tipo = 'ia') AS resposta_ia_p95_s
+    FROM mensagens m LEFT JOIN outbox o ON o.id_evento = m.causado_por AND m.autor_tipo = 'ia'
+    WHERE m.criada_em > now() - make_interval(mins => :minutos)
+    GROUP BY 1
+), esc AS (
+    SELECT date_bin(make_interval(secs => :passo), criada_em, timestamptz '2000-01-01') AS t, count(*) AS escalas
+    FROM escalas WHERE criada_em > now() - make_interval(mins => :minutos) GROUP BY 1
+)
+SELECT b.t, coalesce(m.cliente, 0) AS cliente, coalesce(m.ia, 0) AS ia, coalesce(m.humano, 0) AS humano,
+       coalesce(e.escalas, 0) AS escalas, m.resposta_ia_p95_s
+FROM baldes b LEFT JOIN msgs m USING (t) LEFT JOIN esc e USING (t)
+ORDER BY b.t
+"""
+
+
+@router.get("/supervisor/serie", summary="Série das chamadas por intervalo, para o painel ao vivo")
+async def serie(minutos: int = 10, passo: int = 5):
+    """Mensagens do cliente, respostas da IA e de humanos e escalas por balde de `passo` segundos
+    nos últimos `minutos`, mais a p95 do tempo de resposta da IA (do evento gravado na outbox até
+    a resposta gravada). Contagens por balde; a tela divide pelo passo para mostrar por segundo."""
+    minutos, passo = max(1, min(minutos, 120)), max(1, min(passo, 300))
+    async with Sessao() as s:
+        r = await s.execute(text(SERIE), {"minutos": minutos, "passo": passo})
+        pontos = [
+            {"t": x["t"].isoformat(), "cliente": x["cliente"], "ia": x["ia"], "humano": x["humano"],
+             "escalas": x["escalas"],
+             "resposta_ia_p95_s": round(float(x["resposta_ia_p95_s"]), 3) if x["resposta_ia_p95_s"] is not None else None}
+            for x in r.mappings().all()
+        ]
+        abertas = (await s.execute(text(
+            "SELECT count(*) FROM conversas WHERE estado <> 'resolvida'"))).scalar()
+        na_fila = (await s.execute(text(
+            "SELECT count(*) FROM conversas WHERE estado IN ('na_fila', 'escalada')"))).scalar()
+        pendentes = (await s.execute(text(
+            "SELECT count(*) FROM outbox WHERE status IN ('pendente', 'enviando')"))).scalar()
+        total = (await s.execute(text("SELECT count(*) FROM mensagens WHERE autor_tipo = 'cliente'"))).scalar()
+    return {"passo_s": passo, "pontos": pontos, "conversas_abertas": abertas, "aguardando_atendente": na_fila,
+            "outbox_pendente": pendentes, "mensagens_do_cliente_total": total}
