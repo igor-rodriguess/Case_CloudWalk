@@ -1,10 +1,104 @@
 @import "tailwindcss";
 
+/*
+ * Identidade visual a partir de cloudwalk.io: fundo quase preto, texto off-white (#ecebe9),
+ * verde-terminal, laranja e azul da marca; títulos em Gabarito e rótulos em IBM Plex Mono.
+ * As escalas do Tailwind usadas nas telas são remapeadas para o tema escuro aqui, então os
+ * componentes existentes mudam de tema sem trocar classe por classe: "white" vira a superfície
+ * dos cartões e a escala zinc vai do fundo (50) ao texto principal (900).
+ */
+@theme {
+  --color-white: #141414;
+  --color-black: #000000;
+
+  --color-zinc-50: #0b0b0b;
+  --color-zinc-100: #1c1c1c;
+  --color-zinc-200: #262626;
+  --color-zinc-300: #363636;
+  --color-zinc-400: #6f6f6f;
+  --color-zinc-500: #9a9a9a;
+  --color-zinc-600: #b3b3b3;
+  --color-zinc-700: #cfcfcf;
+  --color-zinc-800: #e0dfdc;
+  --color-zinc-900: #ecebe9;
+
+  /* links e destaques: verde-terminal da marca */
+  --color-sky-50: #0e1f12;
+  --color-sky-100: #132a18;
+  --color-sky-200: #1c4223;
+  --color-sky-700: #24d332;
+  --color-sky-800: #5be368;
+
+  --color-red-50: #2a1114;
+  --color-red-100: #3a161b;
+  --color-red-200: #5a1f27;
+  --color-red-300: #7a2a34;
+  --color-red-500: #ff667d;
+  --color-red-700: #ff667d;
+  --color-red-800: #ff8a9b;
+
+  --color-amber-100: #2e2210;
+  --color-amber-400: #f3bf73;
+  --color-amber-800: #f3bf73;
+
+  --color-emerald-50: #0e2414;
+  --color-emerald-100: #12301a;
+  --color-emerald-200: #1b4a27;
+  --color-emerald-700: #24d332;
+  --color-emerald-800: #5be368;
+
+  --color-violet-50: #151a2e;
+  --color-violet-100: #1a2142;
+  --color-violet-200: #2b3a73;
+  --color-violet-800: #9cb8ff;
+
+  /* cores próprias da marca, para o painel ao vivo */
+  --color-cw-verde: #24d332;
+  --color-cw-laranja: #e25813;
+  --color-cw-azul: #467afc;
+  --color-cw-areia: #f3bf73;
+  --color-cw-papel: #ecebe9;
+}
+
 @theme inline {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-  --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  --font-sans: var(--fonte-gabarito), ui-sans-serif, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-mono: var(--fonte-plex), ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+:root {
+  color-scheme: dark;
 }
 
 body {
   font-family: var(--font-sans);
+  background-color: #0b0b0b;
+  color: #ecebe9;
+}
+
+::selection {
+  background: #24d332;
+  color: #000;
+}
+
+/* rótulo de seção no estilo do site: mono, caixa alta, espaçado */
+.rotulo-cw {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #9a9a9a;
+}
+
+@keyframes pulso-cw {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.pulso-cw {
+  animation: pulso-cw 1.6s ease-in-out infinite;
 }

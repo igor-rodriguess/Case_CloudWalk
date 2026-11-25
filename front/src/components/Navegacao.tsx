@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const GRUPOS = [
+  { perfil: "Operação", links: [{ href: "/", texto: "Ao vivo" }] },
   { perfil: "Cliente", links: [{ href: "/cliente", texto: "Chat" }] },
   { perfil: "Analista", links: [{ href: "/analista", texto: "Painel" }] },
   {
@@ -31,7 +32,7 @@ function Links({ atual }: { atual: string }) {
         <div key={g.perfil} className="flex items-center gap-2">
           <span className="text-xs uppercase tracking-wide text-zinc-400">{g.perfil}</span>
           {g.links.map((l) => {
-            const ativo = atual === l.href || atual.startsWith(l.href + "/");
+            const ativo = l.href === "/" ? atual === "/" : atual === l.href || atual.startsWith(l.href + "/");
             return (
               <Link
                 key={l.href}
