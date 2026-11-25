@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { decimal } from "@/lib/formatar";
 
 export interface Serie {
   chave: string;
@@ -34,7 +35,7 @@ function hora(t: string): string {
  * Gráfico de linhas em SVG, um eixo só: linhas de 2 px, grade recessiva, rótulo direto no fim de
  * cada série (identidade nunca só pela cor), cursor com tooltip e alternância para tabela.
  */
-export function GraficoLinhas({ pontos, series, unidade, formatar = (v) => v.toFixed(1) }: {
+export function GraficoLinhas({ pontos, series, unidade, formatar = (v) => decimal(v) }: {
   pontos: Ponto[];
   series: Serie[];
   unidade: string;

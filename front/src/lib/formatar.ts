@@ -54,3 +54,8 @@ export const ROTULO_AUTOR: Record<string, string> = {
 export const ESTADOS = ["nova", "na_fila", "com_ia", "escalada", "com_humano", "resolvida"] as const;
 export const MARCAS = ["infinitepay", "jim"] as const;
 export const CANAIS = ["chat", "whatsapp", "email"] as const;
+
+/** Número com uma casa decimal no padrão brasileiro (10,0). */
+export function decimal(v: number, casas = 1): string {
+  return v.toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas });
+}

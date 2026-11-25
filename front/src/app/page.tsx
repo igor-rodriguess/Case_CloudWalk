@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { GraficoLinhas, type Ponto } from "@/components/GraficoLinhas";
+import { decimal } from "@/lib/formatar";
 import { apiPost, textoDoErro } from "@/lib/api";
 import { useSondagem } from "@/lib/useSondagem";
 
@@ -28,7 +29,7 @@ interface Serie {
 // laranja da marca, ajustados para a faixa de luminosidade do tema escuro.
 const SERIES = [
   { chave: "cliente", nome: "Lojistas", cor: "#467afc" },
-  { chave: "ia", nome: "IA", cor: "#1fb02b" },
+  { chave: "ia", nome: "IA", cor: "#24a8a8" },
   { chave: "humano", nome: "Analistas", cor: "#e25813" },
 ];
 const SERIE_P95 = [{ chave: "resposta_ia_p95_s", nome: "p95", cor: "#f3bf73" }];
@@ -128,10 +129,10 @@ export default function PainelAoVivo() {
       )}
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Numero rotulo="lojistas/s" valor={porSegundo("cliente").toFixed(1)} detalhe="mensagens entrando (30 s)" destaque />
-        <Numero rotulo="respostas/s" valor={(porSegundo("ia") + porSegundo("humano")).toFixed(1)}
-          detalhe={`IA ${porSegundo("ia").toFixed(1)} · analistas ${porSegundo("humano").toFixed(1)}`} />
-        <Numero rotulo="resposta da IA p95" valor={p95.length ? `${Math.max(...p95).toFixed(1)} s` : "—"}
+        <Numero rotulo="lojistas/s" valor={decimal(porSegundo("cliente"))} detalhe="mensagens entrando (30 s)" destaque />
+        <Numero rotulo="respostas/s" valor={decimal(porSegundo("ia") + porSegundo("humano"))}
+          detalhe={`IA ${decimal(porSegundo("ia"))} · analistas ${decimal(porSegundo("humano"))}`} />
+        <Numero rotulo="resposta da IA p95" valor={p95.length ? `${decimal(Math.max(...p95))} s` : "—"}
           detalhe="do evento à resposta gravada (30 s)" />
         <Numero rotulo="conversas abertas" valor={(dados?.conversas_abertas ?? 0).toLocaleString("pt-BR")}
           detalhe={`${(dados?.aguardando_atendente ?? 0).toLocaleString("pt-BR")} aguardando atendente`} />
